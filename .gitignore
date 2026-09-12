@@ -59,6 +59,7 @@ htmlcov/
 .cache/
 backend/cache/
 *.tmp
+frontend/.parcel-cache/
 
 # Logs
 *.log
