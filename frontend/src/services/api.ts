@@ -5,7 +5,9 @@
 
 import axios from 'axios';
 
-const API_BASE = '/api';
+const API_BASE = (typeof process !== 'undefined' && process.env.API_URL) 
+  ? process.env.API_URL 
+  : 'http://localhost:8000/api';
 
 export interface ConjunctionEvent {
   tca: string;
