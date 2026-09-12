@@ -65,7 +65,9 @@ async def health():
     }
 
 
-# Import routers (will be added in Phase 1-2)
-# from app.routers import conjunctions, maneuvers
-# app.include_router(conjunctions.router, prefix="/api", tags=["conjunctions"])
+# Import routers
+from app.routers import conjunctions
+app.include_router(conjunctions.router, prefix="/api", tags=["conjunctions"])
+# Maneuvers router will be added in Phase 2
+# from app.routers import maneuvers
 # app.include_router(maneuvers.router, prefix="/api", tags=["maneuvers"])
