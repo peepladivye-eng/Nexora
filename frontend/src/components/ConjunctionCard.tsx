@@ -1,16 +1,18 @@
 /**
  * NEXORA ConjunctionCard
- * Clickable conjunction event card with risk badge and key stats
+ * Clickable conjunction event card with risk badge, key stats, and Trust Score
  */
 
 import { motion } from 'framer-motion';
 import { ConjunctionEvent } from '../services/api';
 import RiskBadge from './RiskBadge';
+import { computeTrustScore, trustColor, trustLabel } from '../utils/trustScore';
 
 interface ConjunctionCardProps {
   event: ConjunctionEvent;
   onSelect: (ev: ConjunctionEvent) => void;
   isSelected: boolean;
+  trustFilter?: number;
 }
 
 const KNOWN: Record<string, string> = {
@@ -36,7 +38,13 @@ function ttcLabel(tcaIso: string): string {
   return `${h}h ${m}m`;
 }
 
-export default function ConjunctionCard({ event, onSelect, isSelected }: ConjunctionCardProps) {
+export default function ConjunctionCard({ event, onSelect, isSelected, trustFilter = 0 }: ConjunctionCardProps) {
+  const trust = computeTrustScore(event);
+  if (trust.score < trustFilter) return null;
+
+  const tc = trustColor(trust.score);
+  const tl = trustLabel(trust.score);
+
   return (
     <motion.div
       onClick={() => onSelect(event)}
@@ -58,11 +66,24 @@ export default function ConjunctionCard({ event, onSelect, isSelected }: Conjunc
             ↔ {name(event.norad_id_secondary)}
           </div>
         </div>
-        <RiskBadge
-          level={event.risk_level}
-          showPulse={event.risk_level === 'CRITICAL'}
-          size="sm"
-        />
+        <div className="flex flex-col items-end gap-1">
+          <RiskBadge
+            level={event.risk_level}
+            showPulse={event.risk_level === 'CRITICAL'}
+            size="sm"
+          />
+          <div
+            className="px-1.5 py-0.5 rounded-md text-[9px] font-bold tracking-wide"
+            style={{
+              backgroundColor: `${tc}18`,
+              color: tc,
+              border: `1px solid ${tc}40`,
+            }}
+            title={`Trust ${trust.score.toFixed(0)}/100 · False-alarm rate ${trust.falseAlarmProbability}%`}
+          >
+            TRUST {tl} {trust.score.toFixed(0)}
+          </div>
+        </div>
       </div>
 
       {/* stats row */}
@@ -80,6 +101,12 @@ export default function ConjunctionCard({ event, onSelect, isSelected }: Conjunc
           <div className="font-bold text-white">{ttcLabel(event.tca)}</div>
         </div>
       </div>
+
+      {trust.warnings.length > 0 && (
+        <div className="mt-1.5 pt-1.5 border-t border-white/5 text-[9px] text-amber-400/80 truncate">
+          ⚠ {trust.warnings[0]}
+        </div>
+      )}
     </motion.div>
   );
 }

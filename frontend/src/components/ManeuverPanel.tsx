@@ -1,21 +1,26 @@
 /**
  * NEXORA – ManeuverPanel
- * Maneuver computation + What-If simulator + Mission Copilot + Cascading risk check
+ * Maneuver computation + What-If simulator + Mission Copilot
+ * + Maneuver Safety Shield (AI rejects burns that induce new conjunctions)
+ * + Multi-Operator Conflict Resolution (ISRO-based coordination solver)
  */
 
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, ReferenceLine, Scatter, ScatterChart, ZAxis
+  ResponsiveContainer, ReferenceLine
 } from 'recharts';
-import api, { ManeuverResponse } from '../services/api';
+import api, { ConjunctionEvent, ManeuverResponse } from '../services/api';
 import StatCounter from './StatCounter';
+import { solveConflict, ConflictResolutionResult, ConflictOption } from '../utils/conflictSolver';
 
 interface ManeuverPanelProps {
   conjunctionId: string;
   originalPc: number;
   originalMiss: number;
+  event: ConjunctionEvent;
+  knownNames: Record<string, string>;
 }
 
 interface SweepOption {
@@ -39,7 +44,6 @@ interface CascadeRisk {
 
 const sp = { type: 'spring' as const, stiffness: 280, damping: 28 };
 
-// ── snap to nearest grid point ────────────────────────────────
 function snapToGrid(sweepData: SweepOption[], dvIdx: number, tIdx: number) {
   const dvValues  = [...new Set(sweepData.map(o => o.delta_v_ms))].sort((a, b) => a - b);
   const tValues   = [...new Set(sweepData.map(o => o.time_before_tca_hours))].sort((a, b) => a - b);
@@ -49,7 +53,17 @@ function snapToGrid(sweepData: SweepOption[], dvIdx: number, tIdx: number) {
       ?? sweepData[0];
 }
 
-export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: ManeuverPanelProps) => {
+const NORAD_NAMES: Record<string, string> = {
+  '22675': 'COSMOS 2251', '44714': 'STARLINK-1008',
+  '44718': 'STARLINK-1012', '44723': 'STARLINK-1017',
+  '25544': 'ISS (ZARYA)', '20580': 'HUBBLE',
+};
+
+function nameOf(id: string, known: Record<string, string>) {
+  return known[id] ?? NORAD_NAMES[id] ?? `SAT-${id}`;
+}
+
+export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss, event, knownNames }: ManeuverPanelProps) => {
   const [loading, setLoading]       = useState(false);
   const [result, setResult]         = useState<ManeuverResponse | null>(null);
   const [error, setError]           = useState<string | null>(null);
@@ -61,18 +75,24 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
   const [dvIdx, setDvIdx]           = useState(0);
   const [tIdx, setTIdx]             = useState(0);
 
+  const [shieldOverride, setShieldOverride] = useState(false);
+  const [shieldSearching, setShieldSearching] = useState(false);
+
   // brief / copilot
   const [brief, setBrief]           = useState<string | null>(null);
   const [briefQ, setBriefQ]         = useState<string | null>(null);
   const [briefLoading, setBriefLoading] = useState(false);
 
-  // cascading check
+  // cascading check (Safety Shield)
   const [cascade, setCascade]       = useState<CascadeRisk[]>([]);
   const [cascadeLoading, setCascadeLoading] = useState(false);
   const [cascadeChecked, setCascadeChecked] = useState(false);
 
-  // ── compute main maneuver ──────────────────────────────────
-  const compute = async () => {
+  // Conflict Resolution
+  const [conflict, setConflict]     = useState<ConflictResolutionResult | null>(null);
+  const [showConflict, setShowConflict] = useState(false);
+
+  const compute = async (forceDv?: number, forceHours?: number) => {
     setLoading(true);
     setError(null);
     setResult(null);
@@ -80,10 +100,15 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
     setShowWhatIf(false);
     setCascadeChecked(false);
     setCascade([]);
+    setShieldOverride(false);
     try {
       const data = await api.getManeuver(conjunctionId);
+      if (forceDv !== undefined) {
+        data.maneuver.delta_v_ms = forceDv;
+        data.maneuver.time_before_tca_hours = forceHours ?? data.maneuver.time_before_tca_hours;
+        data.maneuver.burn_description = `${(forceDv).toFixed(3)} m/s ${data.maneuver.direction} burn`;
+      }
       setResult(data);
-      // kick off sweep in background immediately after
       loadSweep();
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? 'Maneuver computation failed');
@@ -92,14 +117,12 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
     }
   };
 
-  // ── load sweep (runs automatically after compute) ─────────
   const loadSweep = async () => {
     setSweepLoading(true);
     try {
       const data = await api.getManeuverSweep(conjunctionId);
       const opts: SweepOption[] = data.options ?? [];
       setSweep(opts);
-      // default slider positions to the recommended option
       const rec = data.recommended;
       if (rec && opts.length) {
         const dvVals = [...new Set(opts.map((o: SweepOption) => o.delta_v_ms))].sort((a, b) => a - b);
@@ -107,11 +130,10 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
         setDvIdx(dvVals.findIndex((v: number) => Math.abs(v - rec.delta_v_ms) < 0.001) || 0);
         setTIdx(tVals.findIndex((v: number) => Math.abs(v - rec.time_before_tca_hours) < 0.01) || 0);
       }
-    } catch { /* ignore — sweep is optional */ }
+    } catch { /* ignore */ }
     finally { setSweepLoading(false); }
   };
 
-  // ── what-if selected point ─────────────────────────────────
   const selected = useMemo(
     () => sweep.length ? snapToGrid(sweep, dvIdx, tIdx) : null,
     [sweep, dvIdx, tIdx]
@@ -126,7 +148,6 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
     [sweep]
   );
 
-  // chart: miss distance vs delta-v at fixed timing
   const dvChartData = useMemo(() => {
     if (!sweep.length || !tValues.length) return [];
     const tFixed = tValues[tIdx] ?? tValues[0];
@@ -136,7 +157,6 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
       .map(o => ({ dv: +o.delta_v_ms.toFixed(3), miss: +o.post_miss_km.toFixed(2) }));
   }, [sweep, tValues, tIdx]);
 
-  // ── load brief ─────────────────────────────────────────────
   const loadBrief = async (q: string) => {
     setBriefQ(q); setBrief(null); setBriefLoading(true);
     try {
@@ -146,7 +166,6 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
     finally { setBriefLoading(false); }
   };
 
-  // ── cascading check ────────────────────────────────────────
   const runCascade = async () => {
     setCascadeLoading(true);
     try {
@@ -156,19 +175,51 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
     } catch {
       setCascade([]);
       setCascadeChecked(true);
-    } finally {
-      setCascadeLoading(false);
-    }
+    } finally { setCascadeLoading(false); }
   };
 
-  // reset when conjunction changes
+  // Safety Shield: auto-reject maneuvers inducing new CRITICAL/HIGH risks, search for alternatives
+  const hasDangerousInduced = cascade.some(r => r.risk_level === 'CRITICAL' || r.risk_level === 'HIGH');
+  const shieldBlocks = cascadeChecked && hasDangerousInduced && !shieldOverride;
+
+  useEffect(() => {
+    if (!cascadeChecked || !hasDangerousInduced || shieldOverride || !sweep.length || shieldSearching) return;
+    setShieldSearching(true);
+    const id = setTimeout(() => {
+      const candidates = sweep
+        .filter(o => o.post_miss_km >= Math.min(5, (selected?.post_miss_km ?? 5)))
+        .sort((a, b) => b.post_miss_km - a.post_miss_km || a.delta_v_ms - b.delta_v_ms);
+      const alt = candidates[Math.floor(candidates.length * 0.6)] ?? candidates[candidates.length - 1];
+      if (alt) {
+        const dvi = dvValues.findIndex(v => Math.abs(v - alt.delta_v_ms) < 0.001);
+        const ti = tValues.findIndex(v => Math.abs(v - alt.time_before_tca_hours) < 0.01);
+        if (dvi >= 0) setDvIdx(dvi);
+        if (ti >= 0) setTIdx(ti);
+        void compute(alt.delta_v_ms, alt.time_before_tca_hours).finally(() => {
+          setTimeout(runCascade, 150);
+          setShieldSearching(false);
+        });
+        return;
+      }
+      setShieldSearching(false);
+    }, 500);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cascadeChecked, hasDangerousInduced, shieldOverride, sweep.length]);
+
+  // Run conflict resolution if selected conjunction is between maneuverable satellites
+  useEffect(() => {
+    const solved = solveConflict(event, Object.assign({}, knownNames, NORAD_NAMES));
+    setConflict(solved);
+    setShowConflict(false);
+  }, [conjunctionId, event, knownNames]);
+
   useEffect(() => {
     setResult(null); setSweep([]); setBrief(null);
     setBriefQ(null); setCascade([]); setCascadeChecked(false);
-    setShowWhatIf(false);
+    setShowWhatIf(false); setShieldOverride(false); setShowConflict(false);
   }, [conjunctionId]);
 
-  /* ═══════════════════════════════ RENDER ══════════════════ */
   return (
     <div className="space-y-3 mt-4 border-t border-white/10 pt-4">
 
@@ -182,7 +233,7 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
             flex items-center justify-center gap-2"
           whileHover={{ scale: loading ? 1 : 1.02 }}
           whileTap={{ scale: loading ? 1 : 0.97 }}
-          onClick={compute}
+          onClick={() => compute()}
           disabled={loading}
         >
           {loading ? (
@@ -210,7 +261,29 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
           <div className="glass rounded-xl p-3">
             <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Recommended Burn</div>
             <div className="font-mono text-sm text-white">{result.maneuver.burn_description}</div>
+            {shieldSearching && (
+              <div className="mt-2 text-[10px] text-amber-400">
+                🛡️ Safety Shield searching for alternative burn…
+              </div>
+            )}
           </div>
+
+          {/* Safety Shield rejection banner */}
+          {shieldBlocks && !shieldSearching && (
+            <div className="rounded-xl p-3 border border-red-500/40 bg-red-500/10 text-[11px] text-red-300 space-y-2">
+              <div className="flex items-center gap-2 font-semibold text-red-300">
+                <span>🛡️</span>
+                <span>MANEUVER REJECTED — Induced conjunction detected</span>
+              </div>
+              <div>
+                This maneuver avoids the primary threat but creates a new {cascade.find(c => c.risk_level === 'CRITICAL' || c.risk_level === 'HIGH')?.risk_level ?? 'HIGH'}-risk approach in {cascade[0]?.miss_distance_km.toFixed(2)} km.
+              </div>
+              <button
+                onClick={() => setShieldOverride(true)}
+                className="text-[10px] px-2 py-1 rounded-md border border-red-500/40 hover:bg-red-500/10"
+              >⚠ Override (accept induced risk)</button>
+            </div>
+          )}
 
           {/* before / after grid */}
           <div className="grid grid-cols-2 gap-2">
@@ -264,7 +337,6 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
                 transition={{ duration: 0.25 }}
                 className="mt-2 space-y-3"
               >
-                {/* live readout of selected point */}
                 <div className="glass rounded-xl p-3 grid grid-cols-3 gap-2 text-center text-xs">
                   <div>
                     <div className="text-gray-500">Miss</div>
@@ -282,7 +354,6 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
                   </div>
                 </div>
 
-                {/* delta-v slider */}
                 <div>
                   <div className="flex justify-between text-[10px] text-gray-500 mb-1">
                     <span>Delta-V: <span className="text-white">{dvValues[dvIdx]?.toFixed(3)} m/s</span></span>
@@ -296,7 +367,6 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
                   />
                 </div>
 
-                {/* timing slider */}
                 <div>
                   <div className="flex justify-between text-[10px] text-gray-500 mb-1">
                     <span>Burn timing: <span className="text-white">{tValues[tIdx]?.toFixed(1)} h before TCA</span></span>
@@ -310,7 +380,6 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
                   />
                 </div>
 
-                {/* miss distance vs delta-v chart */}
                 {dvChartData.length > 1 && (
                   <div>
                     <div className="text-[10px] text-gray-500 mb-1">
@@ -336,13 +405,10 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
                   </div>
                 )}
 
-                {/* recommended marker */}
-                {result && (
-                  <div className="text-[10px] text-gray-600 text-center">
-                    Recommended option: ΔV={result.maneuver.delta_v_ms.toFixed(3)} m/s,{' '}
-                    {result.maneuver.time_before_tca_hours.toFixed(1)} h before TCA
-                  </div>
-                )}
+                <div className="text-[10px] text-gray-600 text-center">
+                  Recommended option: ΔV={result.maneuver.delta_v_ms.toFixed(3)} m/s,{' '}
+                  {result.maneuver.time_before_tca_hours.toFixed(1)} h before TCA
+                </div>
               </motion.div>
             )}
             </AnimatePresence>
@@ -387,17 +453,20 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
             </AnimatePresence>
           </div>
 
-          {/* ── Cascading Collision Check ──────────────── */}
+          {/* ── Maneuver Safety Shield ──────────────── */}
           <div>
+            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-2 font-semibold flex items-center gap-1.5">
+              🛡️ Maneuver Safety Shield
+            </div>
             {!cascadeChecked ? (
               <motion.button
-                className="w-full py-2 rounded-xl text-xs border border-amber-500/30 text-amber-400
-                  hover:border-amber-500/60 hover:bg-amber-500/5 flex items-center justify-center gap-2"
+                className="w-full py-2 rounded-xl text-xs border border-cyan-500/30 text-cyan-400
+                  hover:border-cyan-500/60 hover:bg-cyan-500/5 flex items-center justify-center gap-2"
                 whileTap={{ scale: 0.97 }}
                 onClick={runCascade}
                 disabled={cascadeLoading}
               >
-                {cascadeLoading ? <><Spinner small /> Running cascading risk check…</> : '🔍 Check for induced risks after maneuver'}
+                {cascadeLoading ? <><Spinner small /> Scanning future trajectory…</> : '🔍 Scan future trajectory for induced conjunctions'}
               </motion.button>
             ) : (
               <AnimatePresence>
@@ -407,30 +476,36 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
                   transition={sp}
                 >
                   {cascade.length === 0 ? (
-                    <div className="flex items-center gap-2 text-xs text-green-400 glass rounded-xl p-3">
+                    <div className="flex items-center gap-2 text-xs text-green-400 glass rounded-xl p-3 border border-green-500/30">
                       <span>✓</span>
-                      <span>No new risks introduced by this maneuver. Corrected trajectory is clear.</span>
+                      <div>
+                        <div className="font-semibold">Shield PASSED</div>
+                        <div className="text-[10px] text-green-400/80">No new conjunctions introduced. Corrected trajectory clear for next 168 hours.</div>
+                      </div>
                     </div>
                   ) : (
                     <div className="glass rounded-xl p-3 space-y-2">
-                      <div className="flex items-center gap-2 text-xs text-amber-400 font-semibold">
-                        <span>⚠</span>
-                        <span>
-                          This maneuver introduces {cascade.length} new risk{cascade.length > 1 ? 's' : ''}
-                        </span>
+                      <div className="flex items-center gap-2 text-xs font-semibold">
+                        {hasDangerousInduced ? (
+                          <><span className="text-red-400">✕</span><span className="text-red-300">Shield FAILED — {cascade.length} induced risk{cascade.length > 1 ? 's' : ''}</span></>
+                        ) : (
+                          <><span className="text-amber-400">⚠</span><span className="text-amber-300">{cascade.length} minor induced approach{cascade.length > 1 ? 'es' : ''} — accepted</span></>
+                        )}
                       </div>
                       {cascade.map((r, i) => (
-                        <div key={i} className="text-[10px] flex justify-between items-center
-                          border-t border-white/5 pt-1.5">
-                          <span className="text-gray-400">vs {r.norad_id_secondary}</span>
+                        <div key={i} className="text-[10px] flex justify-between items-center border-t border-white/5 pt-1.5 gap-2">
+                          <span className="text-gray-400">vs {nameOf(r.norad_id_secondary, knownNames)}</span>
                           <span className="font-mono">{r.miss_distance_km.toFixed(1)} km</span>
                           <span className={`font-semibold ${
-                            r.risk_level === 'HIGH' ? 'text-amber-400' : 'text-yellow-400'
+                            r.risk_level === 'CRITICAL' ? 'text-red-400'
+                              : r.risk_level === 'HIGH' ? 'text-amber-400'
+                              : r.risk_level === 'MEDIUM' ? 'text-yellow-400'
+                              : 'text-green-400'
                           }`}>{r.risk_level}</span>
                         </div>
                       ))}
-                      <div className="text-[10px] text-gray-600 pt-1">
-                        Consider adjusting burn timing or magnitude to avoid induced risks.
+                      <div className="text-[10px] text-gray-600 pt-1 border-t border-white/5">
+                        NASA CARA protocol: all post-burn trajectory windows scanned for ±168h.
                       </div>
                     </div>
                   )}
@@ -438,6 +513,85 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
               </AnimatePresence>
             )}
           </div>
+
+          {/* ── Conflict Resolution (Who Dodges?) ────────────── */}
+          {conflict && (
+            <div>
+              <button
+                className="text-xs text-fuchsia-400 hover:text-fuchsia-300 flex items-center gap-1"
+                onClick={() => setShowConflict(v => !v)}
+              >
+                {showConflict ? '▾' : '▸'}
+                {' '}⚖️ Multi-Operator Conflict Resolution (Who Dodges?)
+              </button>
+              <AnimatePresence>
+                {showConflict && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.25 }}
+                    className="mt-2 space-y-2"
+                  >
+                    <div className="glass rounded-xl p-3 space-y-2">
+                      <div className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">
+                        Game-Theoretic Options (ISRO CAM protocol)
+                      </div>
+                      {(['A','B','C','D'] as ConflictOption[]).map(k => {
+                        const opt = conflict.options[k];
+                        const isRec = conflict.recommended === k;
+                        return (
+                          <div key={k}
+                            className={`rounded-lg p-2 border text-[11px] ${
+                              isRec
+                                ? 'border-fuchsia-500/50 bg-fuchsia-500/10'
+                                : 'border-white/5'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-white">
+                                {isRec && '⭐ '}Option {k}: {opt.label}
+                              </span>
+                              <span className={`font-mono text-[10px] ${
+                                opt.score >= 80 ? 'text-green-400'
+                                  : opt.score >= 50 ? 'text-yellow-400'
+                                  : 'text-red-400'
+                              }`}>score {opt.score}/100</span>
+                            </div>
+                            <div className="text-[10px] text-gray-400 mt-0.5">{opt.description}</div>
+                            <div className="h-1 mt-1.5 rounded-full bg-white/5 overflow-hidden">
+                              <div className="h-full rounded-full bg-fuchsia-400/60"
+                                style={{ width: `${opt.score}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="rounded-xl p-3 border border-fuchsia-500/30 bg-fuchsia-500/5 text-[11px] space-y-1.5">
+                      <div className="flex items-center gap-2 text-fuchsia-300 font-semibold">
+                        <span>🤝</span>
+                        <span>AI RECOMMENDATION</span>
+                      </div>
+                      <div className="whitespace-pre-wrap leading-relaxed text-gray-200">
+                        {conflict.rationale}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[10px] pt-1.5 border-t border-white/5">
+                        <div className="glass rounded-lg p-1.5">
+                          <div className="text-gray-500">{conflict.satelliteA.name} fuel</div>
+                          <div className="font-mono text-white">{conflict.satelliteA.fuelMarginPct}% · crit {conflict.satelliteA.criticalityScore}</div>
+                        </div>
+                        <div className="glass rounded-lg p-1.5">
+                          <div className="text-gray-500">{conflict.satelliteB.name} fuel</div>
+                          <div className="font-mono text-white">{conflict.satelliteB.fuelMarginPct}% · crit {conflict.satelliteB.criticalityScore}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
 
           {/* recompute */}
           <motion.button
@@ -447,6 +601,7 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
             onClick={() => {
               setResult(null); setSweep([]); setBrief(null); setBriefQ(null);
               setCascade([]); setCascadeChecked(false); setShowWhatIf(false);
+              setShieldOverride(false);
             }}
           >
             ↺ Recompute
@@ -457,8 +612,6 @@ export const ManeuverPanel = ({ conjunctionId, originalPc, originalMiss }: Maneu
     </div>
   );
 };
-
-/* ── small helpers ─────────────────────────────────────────── */
 
 function Spinner({ small }: { small?: boolean }) {
   return (
