@@ -1,356 +1,421 @@
 /**
- * NEXORA - Orbital Collision Avoidance System
- * Main Application Component
+ * NEXORA – Orbital Collision Avoidance System
+ * Main Application
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import api, { ConjunctionEvent } from './services/api';
 import GlassPanel from './components/GlassPanel';
 import ConjunctionCard from './components/ConjunctionCard';
 import RiskBadge from './components/RiskBadge';
 import StatCounter from './components/StatCounter';
+import ManeuverPanel from './components/ManeuverPanel';
+import GlobeView from './components/GlobeView';
 import './App.css';
 
-function App() {
-  const [conjunctions, setConjunctions] = useState<ConjunctionEvent[]>([]);
-  const [selectedEvent, setSelectedEvent] = useState<ConjunctionEvent | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
-    total_events: 0,
-    CRITICAL: 0,
-    HIGH: 0,
-    MEDIUM: 0,
-    LOW: 0
-  });
-  const [bootComplete, setBootComplete] = useState(false);
+/* ─── helpers ───────────────────────────────────────────── */
 
-  // Boot sequence
+// Known NORAD IDs → friendly names
+const KNOWN_NAMES: Record<string, string> = {
+  '22675': 'COSMOS 2251',
+  '33757': 'COSMOS 2251 DEB',
+  '33758': 'COSMOS 2251 DEB',
+  '33760': 'COSMOS 2251 DEB',
+  '33761': 'COSMOS 2251 DEB',
+  '33762': 'COSMOS 2251 DEB',
+  '33764': 'COSMOS 2251 DEB',
+  '33765': 'COSMOS 2251 DEB',
+  '33766': 'COSMOS 2251 DEB',
+  '33768': 'COSMOS 2251 DEB',
+  '33779': 'COSMOS 2251 DEB',
+  '33782': 'COSMOS 2251 DEB',
+  '33785': 'COSMOS 2251 DEB',
+  '33789': 'COSMOS 2251 DEB',
+  '33791': 'COSMOS 2251 DEB',
+  '33792': 'COSMOS 2251 DEB',
+  '33793': 'COSMOS 2251 DEB',
+  '33795': 'COSMOS 2251 DEB',
+  '33797': 'COSMOS 2251 DEB',
+  '33798': 'COSMOS 2251 DEB',
+  '33818': 'COSMOS 2251 DEB',
+  '33821': 'COSMOS 2251 DEB',
+  '33836': 'COSMOS 2251 DEB',
+  '44714': 'STARLINK-1008',
+  '44718': 'STARLINK-1012',
+  '44723': 'STARLINK-1017',
+  '44725': 'STARLINK-1019',
+  '44741': 'STARLINK-1035',
+  '44744': 'STARLINK-1038',
+  '44747': 'STARLINK-1041',
+  '44748': 'STARLINK-1042',
+  '44751': 'STARLINK-1045',
+  '44752': 'STARLINK-1046',
+  '44753': 'STARLINK-1047',
+  '44768': 'STARLINK-1062',
+  '44772': 'STARLINK-1066',
+  '45044': 'STARLINK-1315',
+  '45047': 'STARLINK-1318',
+  '45061': 'STARLINK-1332',
+};
+
+const satName = (norad: string) => KNOWN_NAMES[norad] ?? `SAT-${norad}`;
+
+const conjId = (ev: ConjunctionEvent) =>
+  `${ev.norad_id_primary}_${ev.norad_id_secondary}`;
+
+/* ─── App ────────────────────────────────────────────────── */
+
+export default function App() {
+  const [conjunctions, setConjunctions] = useState<ConjunctionEvent[]>([]);
+  const [selected, setSelected]         = useState<ConjunctionEvent | null>(null);
+  const [loading, setLoading]           = useState(true);
+  const [stats, setStats]               = useState({ total_events: 0, CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 });
+  const [bootDone, setBootDone]         = useState(false);
+  const [lastUpdated, setLastUpdated]   = useState<string | null>(null);
+  const detailRef                       = useRef<HTMLDivElement>(null);
+
+  /* ── boot sequence ── */
   useEffect(() => {
-    const bootTimer = setTimeout(() => {
-      setBootComplete(true);
-    }, 1500);
-    
-    return () => clearTimeout(bootTimer);
+    const t = setTimeout(() => setBootDone(true), 1600);
+    return () => clearTimeout(t);
   }, []);
 
-  // Fetch conjunctions on mount
+  /* ── fetch data ── */
   useEffect(() => {
-    const fetchData = async () => {
+    if (!bootDone) return;
+    (async () => {
       try {
         setLoading(true);
-        const response = await api.getConjunctions(undefined, 50);
-        setConjunctions(response.events);
-        setStats({
-          total_events: response.total_events,
-          ...response.risk_summary
-        });
-      } catch (error) {
-        console.error('Failed to fetch conjunctions:', error);
+        const res = await api.getConjunctions(undefined, 100);
+        setConjunctions(res.events);
+        setStats({ total_events: res.total_events, ...res.risk_summary });
+        setLastUpdated(res.last_updated);
+      } catch (e) {
+        console.error('fetch failed', e);
       } finally {
         setLoading(false);
       }
-    };
+    })();
+  }, [bootDone]);
 
-    if (bootComplete) {
-      fetchData();
+  /* ── scroll detail into view on small screens ── */
+  useEffect(() => {
+    if (selected && detailRef.current) {
+      detailRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [bootComplete]);
+  }, [selected]);
 
-  const handleSelectEvent = (event: ConjunctionEvent) => {
-    setSelectedEvent(event);
-  };
-
-  if (!bootComplete) {
+  /* ── boot screen ── */
+  if (!bootDone) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black flex items-center justify-center">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.8, type: 'spring' }}
-          className="text-center"
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-6">
+        <motion.h1
+          className="text-7xl font-black tracking-tight bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent"
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, type: 'spring', stiffness: 180 }}
         >
-          <motion.h1 
-            className="text-7xl font-bold mb-4 bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent"
-            animate={{ 
-              backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
-            }}
-            transition={{ duration: 3, repeat: Infinity }}
-          >
-            NEXORA
-          </motion.h1>
-          <motion.p 
-            className="text-xl text-gray-400"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5 }}
-          >
-            Orbital Collision Avoidance System
-          </motion.p>
-          <motion.div
-            className="mt-8 text-sm text-gray-500"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: [0, 1, 0] }}
-            transition={{ delay: 1, duration: 2, repeat: Infinity }}
-          >
-            Initializing orbital tracking...
-          </motion.div>
+          NEXORA
+        </motion.h1>
+
+        <motion.p
+          className="text-gray-400 text-lg"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.45 }}
+        >
+          Orbital Collision Avoidance System
+        </motion.p>
+
+        {/* animated orbit ring */}
+        <motion.div
+          className="w-24 h-24 rounded-full border-2 border-blue-500/40"
+          style={{ borderTopColor: '#60a5fa' }}
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: 'linear' }}
+        />
+
+        <motion.div
+          className="text-xs text-gray-600 tracking-widest uppercase"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: [0, 0.8, 0] }}
+          transition={{ delay: 0.8, duration: 1.6, repeat: Infinity }}
+        >
+          Initialising orbital tracking…
         </motion.div>
       </div>
     );
   }
 
+  /* ── main layout ── */
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white">
-      {/* Header */}
-      <motion.header 
-        className="fixed top-0 left-0 right-0 z-50 glass-header p-4"
-        initial={{ y: -100 }}
+    <div className="min-h-screen bg-[#080c14] text-white overflow-x-hidden">
+
+      {/* ── header ── */}
+      <motion.header
+        className="fixed top-0 left-0 right-0 z-50 glass-header px-6 py-3"
+        initial={{ y: -80 }}
         animate={{ y: 0 }}
-        transition={{ type: 'spring', stiffness: 200, damping: 30 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 28 }}
       >
-        <div className="flex items-center justify-between max-w-7xl mx-auto">
-          <div className="flex items-center gap-4">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+        <div className="max-w-screen-2xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl font-black bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
               NEXORA
-            </h1>
-            <span className="text-sm text-gray-400">Collision Avoidance</span>
+            </span>
+            <span className="text-xs text-gray-500 hidden sm:inline">Collision Avoidance</span>
           </div>
-          
-          <div className="flex items-center gap-6">
-            <div className="text-sm">
-              <div className="text-gray-400">Tracking</div>
-              <div className="text-xl font-bold">
-                <StatCounter value={stats.total_events} />
-              </div>
+
+          <div className="flex items-center gap-6 text-sm">
+            {/* live pulse dot */}
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+              <span className="text-gray-400 text-xs">LIVE</span>
             </div>
+
+            <div>
+              <span className="text-gray-500 mr-1">Tracking</span>
+              <span className="font-bold text-lg"><StatCounter value={stats.total_events} /></span>
+              <span className="text-gray-500 ml-1">objects</span>
+            </div>
+
             {stats.CRITICAL > 0 && (
               <div className="flex items-center gap-2">
                 <RiskBadge level="CRITICAL" showPulse size="sm" />
-                <span className="text-sm">
-                  <StatCounter value={stats.CRITICAL} />
-                </span>
+                <span className="font-bold"><StatCounter value={stats.CRITICAL} /></span>
               </div>
+            )}
+
+            {lastUpdated && (
+              <span className="text-gray-600 text-xs hidden lg:inline">
+                Updated {new Date(lastUpdated).toLocaleTimeString()}
+              </span>
             )}
           </div>
         </div>
       </motion.header>
 
-      {/* Main content */}
-      <div className="pt-24 px-4 pb-4">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
-          
-          {/* Left sidebar - Conjunction list */}
-          <motion.div
-            className="lg:col-span-1 space-y-3 max-h-[calc(100vh-120px)] overflow-y-auto"
-            initial={{ x: -100, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
-          >
-            <GlassPanel className="p-4">
-              <h2 className="text-lg font-semibold mb-3">Conjunction Events</h2>
-              <div className="grid grid-cols-4 gap-2 text-xs mb-4">
-                <div className="text-center">
-                  <div className="text-gray-400">Critical</div>
-                  <div className="text-risk-critical font-bold">
-                    <StatCounter value={stats.CRITICAL} />
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-gray-400">High</div>
-                  <div className="text-risk-high font-bold">
-                    <StatCounter value={stats.HIGH} />
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-gray-400">Medium</div>
-                  <div className="text-risk-medium font-bold">
-                    <StatCounter value={stats.MEDIUM} />
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-gray-400">Low</div>
-                  <div className="text-risk-low font-bold">
-                    <StatCounter value={stats.LOW} />
-                  </div>
-                </div>
-              </div>
-            </GlassPanel>
+      {/* ── three-column grid ── */}
+      <div className="pt-20 p-4 max-w-screen-2xl mx-auto grid grid-cols-1 lg:grid-cols-[340px_1fr_380px] gap-4 min-h-[calc(100vh-80px)]">
 
-            {loading ? (
-              <GlassPanel className="p-8 text-center">
+        {/* ── LEFT: conjunction list ── */}
+        <motion.aside
+          className="flex flex-col gap-3 overflow-y-auto max-h-[calc(100vh-90px)] pr-1"
+          initial={{ x: -60, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ delay: 0.1, type: 'spring', stiffness: 200, damping: 28 }}
+        >
+          {/* risk summary bar */}
+          <GlassPanel className="p-4" initial={false}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-semibold text-sm">Conjunction Events</span>
+              <span className="text-xs text-gray-500">{stats.total_events} total</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1 text-center text-xs">
+              {([
+                ['CRITICAL', stats.CRITICAL, 'text-red-400'],
+                ['HIGH',     stats.HIGH,     'text-amber-400'],
+                ['MEDIUM',   stats.MEDIUM,   'text-yellow-400'],
+                ['LOW',      stats.LOW,      'text-green-400'],
+              ] as [string, number, string][]).map(([label, val, color]) => (
+                <div key={label} className="glass rounded-lg py-2">
+                  <div className="text-gray-500">{label}</div>
+                  <div className={`font-bold text-base ${color}`}>
+                    <StatCounter value={val} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </GlassPanel>
+
+          {/* list */}
+          {loading ? (
+            <GlassPanel className="p-10 text-center" initial={false}>
+              <motion.div
+                className="w-8 h-8 rounded-full border-2 border-blue-400 border-t-transparent mx-auto"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+              />
+              <p className="text-gray-500 text-xs mt-4">Running conjunction assessment…</p>
+            </GlassPanel>
+          ) : (
+            <motion.div
+              className="space-y-2"
+              variants={{ show: { transition: { staggerChildren: 0.04 } } }}
+              initial="hidden"
+              animate="show"
+            >
+              {conjunctions.map(ev => (
                 <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-                  className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto"
-                />
-                <p className="text-sm text-gray-400 mt-4">Loading conjunction data...</p>
-              </GlassPanel>
-            ) : conjunctions.length === 0 ? (
-              <GlassPanel className="p-8 text-center">
-                <p className="text-gray-400">No conjunction events detected</p>
-                <p className="text-sm text-gray-500 mt-2">
-                  All satellites operating within safe parameters
-                </p>
-              </GlassPanel>
-            ) : (
-              <motion.div 
-                className="space-y-2"
-                variants={{
-                  show: {
-                    transition: {
-                      staggerChildren: 0.05
+                  key={conjId(ev)}
+                  variants={{ hidden: { opacity: 0, x: -16 }, show: { opacity: 1, x: 0 } }}
+                >
+                  <ConjunctionCard
+                    event={ev}
+                    onSelect={setSelected}
+                    isSelected={
+                      selected?.norad_id_primary   === ev.norad_id_primary &&
+                      selected?.norad_id_secondary === ev.norad_id_secondary
                     }
-                  }
-                }}
-                initial="hidden"
-                animate="show"
+                  />
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
+        </motion.aside>
+
+        {/* ── CENTRE: globe ── */}
+        <motion.div
+          className="rounded-2xl overflow-hidden bg-black relative"
+          style={{ minHeight: 520 }}
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.25, type: 'spring', stiffness: 160, damping: 24 }}
+        >
+          <GlobeView
+            conjunctions={conjunctions}
+            selected={selected}
+            onSelect={setSelected}
+          />
+
+          {/* overlay label */}
+          <div className="absolute top-3 left-4 text-xs text-gray-500 pointer-events-none">
+            🌍 Real-time LEO tracking · {conjunctions.length} active conjunctions
+          </div>
+        </motion.div>
+
+        {/* ── RIGHT: event detail + maneuver ── */}
+        <motion.div
+          ref={detailRef}
+          className="overflow-y-auto max-h-[calc(100vh-90px)] pr-1"
+          initial={{ x: 60, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ delay: 0.35, type: 'spring', stiffness: 200, damping: 28 }}
+        >
+          <AnimatePresence mode="wait">
+            {selected ? (
+              <motion.div
+                key={conjId(selected)}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -16 }}
+                transition={{ type: 'spring', stiffness: 280, damping: 28 }}
               >
-                {conjunctions.map((event) => (
-                  <motion.div
-                    key={`${event.norad_id_primary}_${event.norad_id_secondary}`}
-                    variants={{
-                      hidden: { opacity: 0, x: -20 },
-                      show: { opacity: 1, x: 0 }
-                    }}
-                  >
-                    <ConjunctionCard
-                      event={event}
-                      onSelect={handleSelectEvent}
-                      isSelected={
-                        selectedEvent?.norad_id_primary === event.norad_id_primary &&
-                        selectedEvent?.norad_id_secondary === event.norad_id_secondary
-                      }
+                <GlassPanel className="p-5" initial={false}>
+
+                  {/* header row */}
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <h2 className="font-bold text-base leading-tight">
+                        {satName(selected.norad_id_primary)}
+                      </h2>
+                      <p className="text-gray-500 text-xs">
+                        vs {satName(selected.norad_id_secondary)}
+                      </p>
+                    </div>
+                    <RiskBadge
+                      level={selected.risk_level}
+                      showPulse={selected.risk_level === 'CRITICAL'}
                     />
-                  </motion.div>
-                ))}
+                  </div>
+
+                  {/* NORAD IDs */}
+                  <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
+                    <div className="glass rounded-lg p-2">
+                      <div className="text-gray-500">Primary NORAD</div>
+                      <div className="font-mono font-bold">{selected.norad_id_primary}</div>
+                    </div>
+                    <div className="glass rounded-lg p-2">
+                      <div className="text-gray-500">Secondary NORAD</div>
+                      <div className="font-mono font-bold">{selected.norad_id_secondary}</div>
+                    </div>
+                  </div>
+
+                  {/* big numbers */}
+                  <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div className="glass rounded-xl p-3">
+                      <div className="text-xs text-gray-500 mb-1">Miss Distance</div>
+                      <div className="text-2xl font-black">
+                        {selected.miss_distance_km.toFixed(2)}
+                        <span className="text-sm text-gray-400 ml-1">km</span>
+                      </div>
+                    </div>
+                    <div className="glass rounded-xl p-3">
+                      <div className="text-xs text-gray-500 mb-1">Rel. Velocity</div>
+                      <div className="text-2xl font-black">
+                        {selected.relative_velocity_km_s.toFixed(1)}
+                        <span className="text-sm text-gray-400 ml-1">km/s</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pc dual method */}
+                  <div className="glass rounded-xl p-3 mb-4 text-xs space-y-2">
+                    <div className="text-gray-400 font-semibold uppercase tracking-wider mb-1">
+                      Collision Probability
+                    </div>
+                    {[
+                      ['Foster Method', selected.pc_foster],
+                      ['Chan Method',   selected.pc_chan],
+                    ].map(([label, val]) => (
+                      <div key={label as string} className="flex justify-between items-center">
+                        <span className="text-gray-400">{label as string}</span>
+                        <span className="font-mono font-bold text-sm">
+                          {(val as number).toExponential(2)}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="pt-1 border-t border-white/5 text-gray-600 text-[10px]">
+                      Debris uncertainty calibration: ×2.0 applied
+                    </div>
+                  </div>
+
+                  {/* TCA */}
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-gray-500">Time of Closest Approach</span>
+                  </div>
+                  <div className="font-mono text-sm mb-4">
+                    {new Date(selected.tca).toLocaleString()}
+                  </div>
+
+                  {/* demo badge */}
+                  {(selected as any).is_demo && (
+                    <div className="mb-3 text-[10px] text-gray-600 border border-white/5 rounded px-2 py-1">
+                      ⓘ Demo scenario — illustrative values based on real orbital geometry
+                    </div>
+                  )}
+
+                  {/* ── Maneuver panel ── */}
+                  <ManeuverPanel
+                    conjunctionId={conjId(selected)}
+                    originalPc={selected.pc_foster}
+                    originalMiss={selected.miss_distance_km}
+                  />
+
+                </GlassPanel>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="h-full flex items-center justify-center"
+              >
+                <div className="glass rounded-2xl p-10 text-center">
+                  <div className="text-4xl mb-4">🛰️</div>
+                  <p className="text-gray-300 font-semibold">Select an event</p>
+                  <p className="text-gray-500 text-xs mt-2">
+                    Click any conjunction in the list
+                  </p>
+                </div>
               </motion.div>
             )}
-          </motion.div>
+          </AnimatePresence>
+        </motion.div>
 
-          {/* Center - Globe visualization placeholder */}
-          <motion.div
-            className="lg:col-span-1"
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.4, type: 'spring', stiffness: 200 }}
-          >
-            <GlassPanel className="p-8 h-[600px] flex items-center justify-center">
-              <div className="text-center">
-                <div className="w-32 h-32 mx-auto mb-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 animate-pulse" />
-                <p className="text-xl font-semibold mb-2">3D Globe View</p>
-                <p className="text-sm text-gray-400">
-                  react-globe.gl visualization<br />
-                  Coming in next phase
-                </p>
-              </div>
-            </GlassPanel>
-          </motion.div>
-
-          {/* Right sidebar - Event details */}
-          <motion.div
-            className="lg:col-span-1"
-            initial={{ x: 100, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            transition={{ delay: 0.6, type: 'spring', stiffness: 200 }}
-          >
-            <AnimatePresence mode="wait">
-              {selectedEvent ? (
-                <GlassPanel 
-                  key="selected"
-                  className="p-6"
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <h2 className="text-xl font-semibold">Event Details</h2>
-                    <RiskBadge 
-                      level={selectedEvent.risk_level}
-                      showPulse={selectedEvent.risk_level === 'CRITICAL'}
-                    />
-                  </div>
-
-                  <div className="space-y-4">
-                    <div>
-                      <div className="text-sm text-gray-400">Primary Object</div>
-                      <div className="text-lg font-mono">{selectedEvent.norad_id_primary}</div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm text-gray-400">Secondary Object</div>
-                      <div className="text-lg font-mono">{selectedEvent.norad_id_secondary}</div>
-                    </div>
-
-                    <div className="border-t border-white/10 pt-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <div className="text-sm text-gray-400">Miss Distance</div>
-                          <div className="text-2xl font-bold">
-                            {selectedEvent.miss_distance_km.toFixed(2)}
-                            <span className="text-sm text-gray-400 ml-1">km</span>
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-sm text-gray-400">Rel. Velocity</div>
-                          <div className="text-2xl font-bold">
-                            {selectedEvent.relative_velocity_km_s.toFixed(1)}
-                            <span className="text-sm text-gray-400 ml-1">km/s</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm text-gray-400 mb-2">Collision Probability</div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-400">Foster Method:</span>
-                          <span className="font-mono">{selectedEvent.pc_foster.toExponential(2)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-400">Chan Method:</span>
-                          <span className="font-mono">{selectedEvent.pc_chan.toExponential(2)}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm text-gray-400">Time of Closest Approach</div>
-                      <div className="text-sm font-mono mt-1">
-                        {new Date(selectedEvent.tca).toLocaleString()}
-                      </div>
-                    </div>
-
-                    <motion.button
-                      className="w-full mt-6 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg font-semibold"
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => alert('Maneuver computation coming in next phase!')}
-                    >
-                      Compute Avoidance Maneuver
-                    </motion.button>
-                  </div>
-                </GlassPanel>
-              ) : (
-                <GlassPanel 
-                  key="empty"
-                  className="p-8 text-center h-full flex items-center justify-center"
-                >
-                  <div>
-                    <p className="text-gray-400">Select a conjunction event</p>
-                    <p className="text-sm text-gray-500 mt-2">
-                      Click on an event in the list to view details
-                    </p>
-                  </div>
-                </GlassPanel>
-              )}
-            </AnimatePresence>
-          </motion.div>
-        </div>
       </div>
     </div>
   );
 }
-
-export default App;

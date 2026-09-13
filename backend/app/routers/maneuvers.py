@@ -11,8 +11,9 @@ import numpy as np
 from app.maneuvers import (
     plan_avoidance_maneuver,
     semi_major_axis_from_velocity,
-    recompute_trajectory_with_maneuver
+    recompute_trajectory_with_maneuver,
 )
+from app.engine import calculate_collision_probability
 
 logger = logging.getLogger(__name__)
 
