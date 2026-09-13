@@ -119,12 +119,35 @@ function BootScreen() {
 /* ── main app ── */
 export default function App() {
   const conjunctionMode = useOrbitGuard(s => s.conjunctionMode);
+  const activeScenario = useOrbitGuard(s => s.activeScenario);
+  const setStats = useOrbitGuard(s => s.setStats);
+  const triggerAlert = useOrbitGuard(s => s.triggerAlert);
   const [bootDone, setBootDone] = useState(false);
+  const [scenarioInitialized, setScenarioInitialized] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setBootDone(true), 2000);
     return () => clearTimeout(t);
   }, []);
+
+  // Initialize the default scenario on mount
+  useEffect(() => {
+    if (!bootDone || scenarioInitialized) return;
+    
+    // Import scenario bridge functions
+    import('./services/scenariosBridge').then(({ applyScenario, CONJUNCTIONS_BY_SCENARIO }) => {
+      if (activeScenario) {
+        console.log('🚀 Initializing scenario:', activeScenario);
+        const applied = applyScenario(activeScenario, CONJUNCTIONS_BY_SCENARIO);
+        setStats(applied.stats);
+        if (applied.headline) {
+          // Delay the alert trigger slightly so the UI loads first
+          setTimeout(() => triggerAlert(applied.headline!), 500);
+        }
+        setScenarioInitialized(true);
+      }
+    });
+  }, [bootDone, activeScenario, scenarioInitialized, setStats, triggerAlert]);
 
   if (!bootDone) return <BootScreen />;
 

@@ -25,12 +25,18 @@ export default function ScenariosPanel() {
   const setStats = useOrbitGuard((s) => s.setStats);
 
   const onPick = (id: string) => {
+    console.log('🎯 Scenario clicked:', id);
     const applied = applyScenario(id, CONJUNCTIONS_BY_SCENARIO);
+    console.log('📊 Applied scenario:', applied);
     setScenario(id);
     setStats(applied.stats);
+    console.log('✅ Stats updated:', applied.stats);
     dismissAlert();
     // auto-trigger the headline event so the demo starts instantly
-    if (applied.headline) triggerAlert(applied.headline);
+    if (applied.headline) {
+      console.log('🚨 Triggering alert:', applied.headline);
+      triggerAlert(applied.headline);
+    }
   };
 
   return (
