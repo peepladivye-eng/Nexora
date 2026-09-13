@@ -12,6 +12,7 @@ import RiskBadge from './components/RiskBadge';
 import StatCounter from './components/StatCounter';
 import ManeuverPanel from './components/ManeuverPanel';
 import GlobeView from './components/GlobeView';
+import RiskScoreBar from './components/RiskScoreBar';
 import './App.css';
 
 /* ─── helpers ───────────────────────────────────────────── */
@@ -73,6 +74,7 @@ export default function App() {
   const [stats, setStats]               = useState({ total_events: 0, CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 });
   const [bootDone, setBootDone]         = useState(false);
   const [lastUpdated, setLastUpdated]   = useState<string | null>(null);
+  const [scenario, setScenario]         = useState<string>('');  // '' = live data
   const detailRef                       = useRef<HTMLDivElement>(null);
 
   /* ── boot sequence ── */
@@ -87,7 +89,8 @@ export default function App() {
     (async () => {
       try {
         setLoading(true);
-        const res = await api.getConjunctions(undefined, 100);
+        setSelected(null);
+        const res = await api.getConjunctions(undefined, 100, scenario || undefined);
         setConjunctions(res.events);
         setStats({ total_events: res.total_events, ...res.risk_summary });
         setLastUpdated(res.last_updated);
@@ -97,7 +100,7 @@ export default function App() {
         setLoading(false);
       }
     })();
-  }, [bootDone]);
+  }, [bootDone, scenario]);
 
   /* ── scroll detail into view on small screens ── */
   useEffect(() => {
@@ -171,8 +174,23 @@ export default function App() {
             {/* live pulse dot */}
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-              <span className="text-gray-400 text-xs">LIVE</span>
+              <span className="text-gray-400 text-xs">{scenario ? 'DEMO' : 'LIVE'}</span>
             </div>
+
+            {/* Demo scenario switcher */}
+            <select
+              value={scenario}
+              onChange={e => setScenario(e.target.value)}
+              className="text-xs bg-white/5 border border-white/10 rounded-lg px-2 py-1
+                text-gray-300 hover:border-white/30 cursor-pointer"
+            >
+              <option value="">🛰 Live Data</option>
+              <option value="critical_alert">🚨 Critical Alert</option>
+              <option value="high_activity">⚡ High Activity</option>
+              <option value="default">📊 Typical Ops</option>
+              <option value="educational">🎓 Educational</option>
+              <option value="quiet_ops">✅ Quiet Ops</option>
+            </select>
 
             <div>
               <span className="text-gray-500 mr-1">Tracking</span>
@@ -370,6 +388,19 @@ export default function App() {
                       Debris uncertainty calibration: ×2.0 applied
                     </div>
                   </div>
+
+                  {/* Explainable Risk Score */}
+                  {selected.risk_score !== undefined && (
+                    <div className="mb-4">
+                      <RiskScoreBar
+                        riskScore={selected.risk_score}
+                        riskCategory={selected.risk_category ?? selected.risk_level}
+                        distanceScore={selected.distance_score ?? 0}
+                        velocityScore={selected.velocity_score ?? 0}
+                        urgencyScore={selected.urgency_score ?? 0}
+                      />
+                    </div>
+                  )}
 
                   {/* TCA */}
                   <div className="flex justify-between text-xs mb-1">

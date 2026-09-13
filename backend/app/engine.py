@@ -246,6 +246,54 @@ def chan_pc(miss_distance: float, cov_2d: np.ndarray, hard_body_radius: float = 
     return foster_pc(miss_distance, cov_2d, hard_body_radius) * 0.97
 
 
+# ─────────────────────────────────────────────
+# Explainable Conjunction Risk Score (0-100)
+# Methodology from Siddhanth17/Nexora reference:
+#   distance  50 % weight  (< 10 km baseline)
+#   velocity  30 % weight  (15 km/s baseline)
+#   urgency   20 % weight  (24 h baseline)
+# ─────────────────────────────────────────────
+
+RISK_DISTANCE_BASELINE_KM   = 10.0
+RISK_VELOCITY_BASELINE_KM_S = 15.0
+RISK_TIME_BASELINE_HOURS    = 24.0
+
+
+def conjunction_risk_score(
+    miss_distance_km: float,
+    relative_velocity_km_s: float,
+    time_to_tca_hours: float
+) -> Dict:
+    """
+    Deterministic, explainable 0-100 risk score with three visible factors.
+    Clearly labelled as a triage score, not a collision probability.
+    """
+    distance_score = 100.0 * (1.0 - min(miss_distance_km / RISK_DISTANCE_BASELINE_KM, 1.0))
+    velocity_score = 100.0 * min(relative_velocity_km_s / RISK_VELOCITY_BASELINE_KM_S, 1.0)
+    urgency_score  = 100.0 * (1.0 - min(time_to_tca_hours / RISK_TIME_BASELINE_HOURS, 1.0))
+
+    total = (distance_score * 0.5) + (velocity_score * 0.3) + (urgency_score * 0.2)
+    total = min(max(total, 0.0), 100.0)
+
+    if total >= 85:
+        category = "CRITICAL"
+    elif total >= 70:
+        category = "HIGH"
+    elif total >= 40:
+        category = "MEDIUM"
+    else:
+        category = "LOW"
+
+    return {
+        "risk_score":      round(total, 1),
+        "risk_category":   category,
+        "distance_score":  round(distance_score, 1),
+        "velocity_score":  round(velocity_score, 1),
+        "urgency_score":   round(urgency_score,  1),
+        "weights": {"distance": 0.5, "velocity": 0.3, "urgency": 0.2},
+    }
+
+
 def calculate_collision_probability(event: Dict, debris_uncertainty_multiplier: float = 2.0) -> Dict:
     """
     Compute Foster + Chan Pc with NEXORA's debris-uncertainty calibration layer.
@@ -277,7 +325,6 @@ def calculate_collision_probability(event: Dict, debris_uncertainty_multiplier: 
         "hard_body_radius_km": hbr,
     }
 
-
 # ─────────────────────────────────────────────
 # Full assessment pipeline
 # ─────────────────────────────────────────────
@@ -296,7 +343,7 @@ def assess_conjunctions() -> List[Dict]:
 
     if not debris or not satellites:
         logger.error("No TLE data – falling back to demo events")
-        return _demo_events()
+        return _demo_events("default")
 
     # Small sample, coarse step for fast demo run
     # 300s steps over 1 day = 288 states per object — fast enough
@@ -312,14 +359,23 @@ def assess_conjunctions() -> List[Dict]:
     logger.info(f"Raw conjunctions at 200 km: {len(raw)}")
 
     if not raw:
-        # No real conjunctions found today – inject demo events so the UI is not empty
         logger.warning("No real conjunctions found – adding demo events for display")
-        return _demo_events()
+        return _demo_events("default")
 
     assessed = []
     for ev in raw:
         pc_data = calculate_collision_probability(ev)
-        assessed.append({**ev, **pc_data})
+        try:
+            tca_dt = datetime.fromisoformat(ev["tca"])
+            hours_to_tca = max((tca_dt - datetime.now(tca_dt.tzinfo)).total_seconds() / 3600, 0.1)
+        except Exception:
+            hours_to_tca = 24.0
+        rs = conjunction_risk_score(
+            ev["miss_distance_km"],
+            ev["relative_velocity_km_s"],
+            hours_to_tca
+        )
+        assessed.append({**ev, **pc_data, **rs})
 
     assessed.sort(key=lambda x: x["pc_foster"], reverse=True)
 
@@ -328,116 +384,117 @@ def assess_conjunctions() -> List[Dict]:
     high_risk = [e for e in assessed if e["risk_level"] in ("CRITICAL", "HIGH")]
     if not high_risk:
         logger.info("No HIGH/CRITICAL events in real data – prepending demo events")
-        assessed = _demo_events() + assessed
+        assessed = _demo_events("default") + assessed
 
     logger.info(f"Assessment complete: {len(assessed)} events ranked")
     return assessed[:100]  # cap at 100 for API response
 
 
-def _demo_events() -> List[Dict]:
+def _demo_events(scenario: str = "default") -> List[Dict]:
     """
-    Hardcoded realistic demo conjunction events.
-    Used when real TLE screening doesn't produce notable conjunctions today.
-    These numbers are plausible LEO scenarios, clearly labelled as demo data.
+    Named demo conjunction scenarios.  Clearly labelled as demo data.
+    Scenarios mirror Siddhanth17/Nexora's five demo modes.
     """
     from datetime import timezone
     now = datetime.now(timezone.utc)
 
+    # ── scenario catalogue ──────────────────────────────────────────────
+    SCENARIOS = {
+        "critical_alert": [
+            # Critical Collision Alert — emergency single high-risk event
+            ("44714", "22675", 0.31, 14.7,  4.2, "CRITICAL"),
+            ("44718", "33757", 1.8,  12.2,  9.5, "HIGH"),
+            ("44723", "33758", 8.4,  10.8, 17.0, "MEDIUM"),
+        ],
+        "high_activity": [
+            # High Activity Period — multiple concurrent high-risk events
+            ("44714", "22675", 0.82, 14.7, 18.3, "CRITICAL"),
+            ("44718", "33757", 3.1,  12.2, 31.5, "HIGH"),
+            ("44723", "33758", 5.6,  10.8, 22.0, "HIGH"),
+            ("44725", "33760", 9.2,   9.3, 28.0, "HIGH"),
+            ("44741", "33762", 23.7,  11.1, 41.0, "MEDIUM"),
+            ("44744", "33764", 38.5,  8.6,  63.0, "LOW"),
+        ],
+        "quiet_ops": [
+            # Quiet Operations Period — minimal risk, routine monitoring
+            ("44714", "22675", 45.0, 7.2, 71.0, "LOW"),
+            ("44718", "33757", 48.5, 6.8, 68.0, "LOW"),
+        ],
+        "educational": [
+            # Educational Demonstration — one of each risk level
+            ("44714", "22675",  0.82, 14.7, 18.3, "CRITICAL"),
+            ("44718", "33757",  3.1,  12.2, 31.5, "HIGH"),
+            ("44723", "33758", 23.7,   9.3, 52.0, "MEDIUM"),
+            ("44725", "33760", 44.2,   8.6, 71.8, "LOW"),
+        ],
+        "default": [
+            # Default / Typical Operations Day
+            ("44714", "22675",  0.82, 14.7, 18.3, "CRITICAL"),
+            ("44718", "33757",  3.1,  12.2, 31.5, "HIGH"),
+            ("44723", "33758", 11.4,  10.8, 44.1, "HIGH"),
+            ("44725", "33760", 23.7,   9.3, 52.0, "MEDIUM"),
+            ("44741", "33762", 38.5,  11.1, 63.2, "MEDIUM"),
+            ("44744", "33764", 44.2,   8.6, 71.8, "LOW"),
+        ],
+    }
+
+    base_events_raw = SCENARIOS.get(scenario, SCENARIOS["default"])
+
+    # Convert to full dicts
     base_events = [
         {
-            "norad_id_primary": "44714",   # STARLINK-1008
-            "norad_id_secondary": "22675", # COSMOS 2251 (parent body)
-            "miss_distance_km": 0.82,
-            "relative_velocity_km_s": 14.7,
-            "hours_to_tca": 18.3,
-            "risk_level": "CRITICAL",
-        },
-        {
-            "norad_id_primary": "44718",   # STARLINK-1012
-            "norad_id_secondary": "33757", # COSMOS 2251 DEB
-            "miss_distance_km": 3.1,
-            "relative_velocity_km_s": 12.2,
-            "hours_to_tca": 31.5,
-            "risk_level": "HIGH",
-        },
-        {
-            "norad_id_primary": "44723",
-            "norad_id_secondary": "33758",
-            "miss_distance_km": 11.4,
-            "relative_velocity_km_s": 10.8,
-            "hours_to_tca": 44.1,
-            "risk_level": "HIGH",
-        },
-        {
-            "norad_id_primary": "44725",
-            "norad_id_secondary": "33760",
-            "miss_distance_km": 23.7,
-            "relative_velocity_km_s": 9.3,
-            "hours_to_tca": 52.0,
-            "risk_level": "MEDIUM",
-        },
-        {
-            "norad_id_primary": "44741",
-            "norad_id_secondary": "33762",
-            "miss_distance_km": 38.5,
-            "relative_velocity_km_s": 11.1,
-            "hours_to_tca": 63.2,
-            "risk_level": "MEDIUM",
-        },
-        {
-            "norad_id_primary": "44744",
-            "norad_id_secondary": "33764",
-            "miss_distance_km": 44.2,
-            "relative_velocity_km_s": 8.6,
-            "hours_to_tca": 71.8,
-            "risk_level": "LOW",
-        },
+            "norad_id_primary":        p,
+            "norad_id_secondary":      s,
+            "miss_distance_km":        miss,
+            "relative_velocity_km_s":  vel,
+            "hours_to_tca":            hrs,
+            "risk_level":              risk,
+        }
+        for p, s, miss, vel, hrs, risk in base_events_raw
     ]
 
-    # Realistic LEO orbit (Starlink ~550 km altitude)
-    R0 = 6371 + 550
+    R0 = 6371 + 550  # Starlink ~550 km altitude
+    pc_overrides = {
+        "CRITICAL": (1.5e-4, 1.45e-4),
+        "HIGH":     (2.3e-5, 2.23e-5),
+        "MEDIUM":   (4.1e-6, 3.98e-6),
+        "LOW":      (8.0e-8, 7.76e-8),
+    }
+
     results = []
     for i, ev in enumerate(base_events):
-        angle = (i / len(base_events)) * 2 * np.pi
+        angle = (i / max(len(base_events), 1)) * 2 * np.pi
         r_p = np.array([R0 * np.cos(angle), R0 * np.sin(angle), 200.0 * (i % 3 - 1)])
         v_p = np.array([-7.6 * np.sin(angle), 7.6 * np.cos(angle), 0.1])
-        offset = np.array([ev["miss_distance_km"] * 0.7, ev["miss_distance_km"] * 0.3, ev["miss_distance_km"] * 0.2])
+        miss = ev["miss_distance_km"]
+        offset = np.array([miss * 0.7, miss * 0.3, miss * 0.2])
         r_s = r_p + offset
-        v_s = -v_p * 0.95  # counter-orbit for high relative velocity
+        v_s = -v_p * 0.95
 
         tca_time = now + timedelta(hours=ev["hours_to_tca"])
-        pc_data = calculate_collision_probability(
-            {"miss_distance_km": ev["miss_distance_km"]},
-            debris_uncertainty_multiplier=2.0
-        )
-        # Override risk_level with our pre-assigned value; override Pc to match
-        pc_overrides = {
-            "CRITICAL": (1.5e-4, 1.45e-4),
-            "HIGH":     (2.3e-5, 2.23e-5),
-            "MEDIUM":   (4.1e-6, 3.98e-6),
-            "LOW":      (8.0e-8, 7.76e-8),
-        }
         pc_f, pc_c = pc_overrides[ev["risk_level"]]
 
+        rs = conjunction_risk_score(miss, ev["relative_velocity_km_s"], ev["hours_to_tca"])
+
         results.append({
-            "tca": tca_time.isoformat(),
-            "miss_distance_km": ev["miss_distance_km"],
-            "norad_id_primary": ev["norad_id_primary"],
-            "norad_id_secondary": ev["norad_id_secondary"],
-            "relative_velocity_km_s": ev["relative_velocity_km_s"],
-            "r_primary": r_p.tolist(),
-            "v_primary": v_p.tolist(),
-            "r_secondary": r_s.tolist(),
-            "v_secondary": v_s.tolist(),
-            "is_demo": True,   # flag so frontend can note these are illustrative
-            **pc_data,
-            # Use realistic Pc values that match the intended risk level
-            "pc_foster": pc_f,
-            "pc_chan":   pc_c,
-            "pc_foster_raw": pc_f * 0.5,
-            "risk_level": ev["risk_level"],
-            "uncertainty_multiplier": 2.0,
-            "hard_body_radius_km": 0.011,
+            "tca":                     tca_time.isoformat(),
+            "miss_distance_km":        miss,
+            "norad_id_primary":        ev["norad_id_primary"],
+            "norad_id_secondary":      ev["norad_id_secondary"],
+            "relative_velocity_km_s":  ev["relative_velocity_km_s"],
+            "r_primary":               r_p.tolist(),
+            "v_primary":               v_p.tolist(),
+            "r_secondary":             r_s.tolist(),
+            "v_secondary":             v_s.tolist(),
+            "is_demo":                 True,
+            "demo_scenario":           scenario,
+            "pc_foster":               pc_f,
+            "pc_chan":                 pc_c,
+            "pc_foster_raw":           pc_f * 0.5,
+            "risk_level":              ev["risk_level"],
+            "uncertainty_multiplier":  2.0,
+            "hard_body_radius_km":     0.011,
+            **rs,
         })
 
     return results

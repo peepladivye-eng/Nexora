@@ -15,13 +15,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# In-memory cache of latest assessment
-# In production, this would be Redis or similar
 _assessment_cache = {
     "events": [],
     "last_updated": None,
     "in_progress": False
 }
+
+
+def _summarise_risk(events: List[Dict]) -> Dict:
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for ev in events:
+        k = ev.get("risk_level", "LOW")
+        if k in counts:
+            counts[k] += 1
+    return counts
 
 
 def run_assessment():
@@ -50,7 +57,8 @@ def run_assessment():
 async def get_conjunctions(
     background_tasks: BackgroundTasks,
     risk_level: Optional[str] = None,
-    limit: Optional[int] = 100
+    limit: Optional[int] = 100,
+    demo_scenario: Optional[str] = None,
 ) -> Dict:
     """
     Get all flagged conjunction events, sorted by collision probability
@@ -62,20 +70,33 @@ async def get_conjunctions(
     Returns:
         Dict with events list, metadata, and statistics
     """
+    # If demo_scenario specified, return those events immediately without touching cache
+    if demo_scenario:
+        from app.engine import _demo_events
+        demo_evs = _demo_events(demo_scenario)
+        return {
+            "success": True,
+            "count": len(demo_evs),
+            "total_events": len(demo_evs),
+            "last_updated": datetime.now().isoformat(),
+            "in_progress": False,
+            "demo_scenario": demo_scenario,
+            "risk_summary": _summarise_risk(demo_evs),
+            "tle_statistics": {},
+            "events": demo_evs,
+        }
+
     # If cache is empty or stale (>1 hour), trigger refresh
     if not _assessment_cache["events"] or \
-       (_assessment_cache["last_updated"] and 
+       (_assessment_cache["last_updated"] and
         (datetime.now() - _assessment_cache["last_updated"]).seconds > 3600):
-        
+
         if not _assessment_cache["in_progress"]:
-            # Run assessment in background
             background_tasks.add_task(run_assessment)
-            
-            # If completely empty, run synchronously first time
             if not _assessment_cache["events"]:
                 logger.info("First-time assessment - running synchronously")
                 run_assessment()
-    
+
     events = _assessment_cache["events"]
     
     # Filter by risk level if specified
@@ -93,18 +114,7 @@ async def get_conjunctions(
         logger.warning(f"Failed to get TLE stats: {e}")
         tle_stats = {}
     
-    # Calculate summary statistics
-    risk_counts = {
-        "CRITICAL": 0,
-        "HIGH": 0,
-        "MEDIUM": 0,
-        "LOW": 0
-    }
-    
-    for event in _assessment_cache["events"]:
-        risk_level_key = event.get("risk_level", "LOW")
-        if risk_level_key in risk_counts:
-            risk_counts[risk_level_key] += 1
+    risk_counts = _summarise_risk(_assessment_cache["events"])
     
     return {
         "success": True,

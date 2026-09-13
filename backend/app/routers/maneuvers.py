@@ -5,6 +5,7 @@ Endpoints for computing and analyzing avoidance maneuvers
 
 from fastapi import APIRouter, HTTPException
 from typing import Dict, List, Optional
+from datetime import datetime, timezone
 import logging
 import numpy as np
 
@@ -206,6 +207,128 @@ async def get_maneuver_sweep(conjunction_id: str) -> Dict:
         "options": result["options"],
         "recommended": result["recommended"],
         "count": len(result["options"])
+    }
+
+
+@router.get("/maneuver/{conjunction_id}/cascade")
+async def cascade_check(conjunction_id: str) -> Dict:
+    """
+    After computing a corrected trajectory, re-screen it against all other
+    tracked objects to detect any NEW risks introduced by the maneuver.
+    """
+    from app.routers.conjunctions import _assessment_cache
+    from app.engine import (
+        propagate_sgp4_skyfield, screen_kdtree,
+        calculate_collision_probability, StateVector
+    )
+    from skyfield.api import load
+    import numpy as np
+
+    events = _assessment_cache.get("events", [])
+    if not events:
+        raise HTTPException(status_code=404, detail="No conjunction data available")
+
+    parts = conjunction_id.split("_")
+    primary_id, secondary_id = parts[0], parts[1]
+
+    event = next(
+        (e for e in events
+         if e["norad_id_primary"] == primary_id and e["norad_id_secondary"] == secondary_id),
+        None
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="Conjunction event not found")
+
+    # Get the maneuver (uses cache if already computed)
+    maneuver_data = await compute_maneuver(conjunction_id)
+    rec = maneuver_data["maneuver"]
+
+    # Apply delta-v to primary velocity vector → re-propagate corrected trajectory
+    r_primary = np.array(event["r_primary"])
+    v_primary = np.array(event["v_primary"])
+
+    # Simple in-track delta-v application
+    speed = float(np.linalg.norm(v_primary))
+    if speed > 0:
+        unit_v = v_primary / speed
+        dv_ms  = rec["delta_v_ms"]          # m/s
+        dv_km  = dv_ms / 1000.0             # km/s
+        v_corrected = v_primary + unit_v * dv_km
+    else:
+        v_corrected = v_primary
+
+    # Build a synthetic corrected StateVector at TCA to screen against
+    try:
+        from datetime import datetime, timezone
+        tca = datetime.fromisoformat(event["tca"])
+        if tca.tzinfo is None:
+            tca = tca.replace(tzinfo=timezone.utc)
+    except Exception:
+        from datetime import datetime, timezone
+        tca = datetime.now(timezone.utc)
+
+    corrected_sv = StateVector(
+        epoch=tca,
+        position_km=r_primary,
+        velocity_km_s=v_corrected,
+        norad_id=primary_id + "_corrected"
+    )
+
+    # Screen corrected trajectory against ALL other objects (exclude original secondary)
+    other_events = [
+        e for e in events
+        if not (e["norad_id_primary"] == primary_id and
+                e["norad_id_secondary"] == secondary_id)
+    ]
+
+    induced = []
+    for other in other_events:
+        try:
+            other_sv = StateVector(
+                epoch=tca,
+                position_km=np.array(other["r_secondary"]),
+                velocity_km_s=np.array(other["v_secondary"]),
+                norad_id=other["norad_id_secondary"]
+            )
+
+            new_events = screen_kdtree(
+                [corrected_sv], [other_sv], threshold_km=200.0
+            )
+            for ev in new_events:
+                if ev.miss_distance_km < event["miss_distance_km"] * 0.8:
+                    continue  # not meaningfully worse than original
+
+                pc_data = calculate_collision_probability(
+                    {"miss_distance_km": ev.miss_distance_km}
+                )
+                if pc_data["risk_level"] in ("CRITICAL", "HIGH", "MEDIUM"):
+                    induced.append({
+                        "norad_id_secondary": other["norad_id_secondary"],
+                        "miss_distance_km": round(ev.miss_distance_km, 3),
+                        "pc_foster": pc_data["pc_foster"],
+                        "risk_level": pc_data["risk_level"],
+                    })
+        except Exception:
+            continue
+
+    # Deduplicate by secondary ID
+    seen = set()
+    deduped = []
+    for item in induced:
+        if item["norad_id_secondary"] not in seen:
+            seen.add(item["norad_id_secondary"])
+            deduped.append(item)
+
+    return {
+        "success": True,
+        "conjunction_id": conjunction_id,
+        "induced_risks": deduped,
+        "count": len(deduped),
+        "message": (
+            f"Maneuver introduces {len(deduped)} new risk(s)"
+            if deduped else
+            "No new risks introduced — corrected trajectory is clear"
+        )
     }
 
 

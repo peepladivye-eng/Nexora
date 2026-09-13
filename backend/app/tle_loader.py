@@ -138,32 +138,40 @@ def parse_tle_text(tle_text: str) -> List[Dict[str, str]]:
 def load_tle_group(group_name: str, use_cache: bool = True) -> Dict:
     """
     Load TLE data for a group, using cache if available and valid.
-    
-    Returns:
-        Dict with 'group', 'fetched_at', 'count', 'satellites' keys
+    Falls back to stale cache if network is unavailable.
     """
-    # Check cache first
+    # Check cache first (fresh)
     if use_cache and TLECache.is_cache_valid(group_name):
         logger.info(f"Using cached TLE data for {group_name}")
         cached_data = TLECache.read_cache(group_name)
         if cached_data:
             return cached_data
-    
-    # Fetch fresh data
-    tle_text = fetch_tle_from_celestrak(group_name)
-    satellites = parse_tle_text(tle_text)
-    
-    data = {
-        "group": group_name,
-        "fetched_at": datetime.now().isoformat(),
-        "count": len(satellites),
-        "satellites": satellites
-    }
-    
-    # Cache it
-    TLECache.write_cache(group_name, data)
-    
-    return data
+
+    # Try to fetch fresh data
+    try:
+        tle_text = fetch_tle_from_celestrak(group_name)
+        satellites = parse_tle_text(tle_text)
+
+        data = {
+            "group": group_name,
+            "fetched_at": datetime.now().isoformat(),
+            "count": len(satellites),
+            "satellites": satellites
+        }
+
+        TLECache.write_cache(group_name, data)
+        return data
+
+    except Exception as e:
+        logger.warning(f"Fresh fetch failed for {group_name}: {e} — trying stale cache")
+
+        # Fall back to stale cache if it exists
+        stale = TLECache.read_cache(group_name)
+        if stale:
+            logger.info(f"Using stale cache for {group_name} ({stale['count']} objects)")
+            return stale
+
+        raise RuntimeError(f"No TLE data available for {group_name} (network failed, no cache)")
 
 
 def load_all_debris() -> List[Dict]:

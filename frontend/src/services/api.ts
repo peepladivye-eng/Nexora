@@ -22,6 +22,15 @@ export interface ConjunctionEvent {
   v_primary: number[];
   r_secondary: number[];
   v_secondary: number[];
+  // Explainable risk score (Siddhanth17/Nexora methodology)
+  risk_score?: number;
+  risk_category?: string;
+  distance_score?: number;
+  velocity_score?: number;
+  urgency_score?: number;
+  // Demo metadata
+  is_demo?: boolean;
+  demo_scenario?: string;
 }
 
 export interface ConjunctionsResponse {
@@ -75,11 +84,11 @@ export const api = {
   /**
    * Get all conjunction events
    */
-  async getConjunctions(riskLevel?: string, limit?: number): Promise<ConjunctionsResponse> {
+  async getConjunctions(riskLevel?: string, limit?: number, demoScenario?: string): Promise<ConjunctionsResponse> {
     const params = new URLSearchParams();
-    if (riskLevel) params.append('risk_level', riskLevel);
-    if (limit) params.append('limit', limit.toString());
-    
+    if (riskLevel)    params.append('risk_level', riskLevel);
+    if (limit)        params.append('limit', limit.toString());
+    if (demoScenario) params.append('demo_scenario', demoScenario);
     const response = await axios.get(`${API_BASE}/conjunctions?${params.toString()}`);
     return response.data;
   },
@@ -121,6 +130,14 @@ export const api = {
    */
   async getManeuverBrief(conjunctionId: string, question: string = 'summary') {
     const response = await axios.get(`${API_BASE}/maneuver/${conjunctionId}/brief?question=${question}`);
+    return response.data;
+  },
+
+  /**
+   * Get cascading risk check after a maneuver
+   */
+  async getCascadeCheck(conjunctionId: string) {
+    const response = await axios.get(`${API_BASE}/maneuver/${conjunctionId}/cascade`);
     return response.data;
   },
 
