@@ -84,7 +84,10 @@ export default function TopNav() {
           return (
             <button
               key={tab.label}
-              onClick={() => openPanel(tab.id)}
+              onClick={() => {
+                console.log('🔘 Tab clicked:', tab.id, 'Current activePanel:', activePanel);
+                openPanel(tab.id);
+              }}
               className={`px-4 py-2 text-sm text-white/70 hover:text-white transition-colors ${
                 isActive ? 'nav-underline text-white' : ''
               }`}

@@ -273,7 +273,10 @@ export const useOrbitGuard = create<OrbitGuardState>((set) => {
       ? { selectedConjunction: { ...s.selectedConjunction, ...patch } }
       : {})),
   setStats: (patch) => set((s) => ({ stats: { ...s.stats, ...patch } })),
-  openPanel: (p) => set((s) => ({ activePanel: s.activePanel === p ? null : p })),
+  openPanel: (p) => set((s) => {
+    console.log('📂 openPanel called with:', p, 'current:', s.activePanel, 'will set to:', s.activePanel === p ? null : p);
+    return { activePanel: s.activePanel === p ? null : p };
+  }),
   setScenario: (id) => set({ activeScenario: id }),
   togglePause: () => set((s) => ({ simPaused: !s.simPaused })),
   setSimSpeed: (n) => set({ simSpeed: n, simPaused: false }),

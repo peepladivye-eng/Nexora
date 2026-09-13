@@ -21,9 +21,9 @@ export default function AboutPanel() {
 
   return (
     <AnimatePresence>
-      {activePanel === 'about' && (
+      
         <motion.aside
-          className="pointer-events-auto glass fixed left-[84px] top-16 w-80 max-h-[70vh] overflow-y-auto p-4"
+          className="pointer-events-auto glass fixed left-20 top-20 w-80 max-h-[70vh] overflow-y-auto p-4 z-50"
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -20 }}
