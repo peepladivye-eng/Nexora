@@ -10,7 +10,7 @@ export default function AllPlanets() {
 
   return (
     <>
-      {PLANETS.map((planet) => (
+      {PLANETS.filter((planet) => planet.id !== 'earth').map((planet) => (
         <group key={planet.id}>
           {showOrbits && <OrbitRing radius={planet.distance} />}
           <Planet config={planet}>

@@ -1,16 +1,16 @@
 /**
  * ORBITGUARD – DebrisField
- * ~2,200 debris objects around Earth in a single InstancedMesh (one draw call).
- * Per-instance color encodes risk; brightness encodes the zoom-based reveal:
- * as the camera closes on Earth, higher-risk tiers fade in one by one.
+ * ~2,200 debris objects around Earth in a single InstancedMesh (one draw
+ * call). Per-instance color encodes risk; scale encodes the zoom-based
+ * reveal: as the camera closes on Earth, tiers fade in one by one.
+ * The legend (riskMask) can hide tiers entirely.
  */
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import {
-  DEBRIS_FIELD, generateDebrisInstances,
-} from '../../data/satellites';
+import { DEBRIS_FIELD, generateDebrisInstances } from '../../data/satellites';
 import { getObjectPosition } from '../../data/registry';
+import { useOrbitGuard } from '../../store/orbitGuard';
 
 const RISK_BASE_COLORS = [
   new THREE.Color('#22c55e'),
@@ -30,17 +30,16 @@ export default function DebrisField({ earthGroup }: { earthGroup: React.RefObjec
   const tierFactor = useRef([0, 0, 0, 0]);
 
   const dummy = useMemo(() => new THREE.Object3D(), []);
-  const pos = useMemo(() => new THREE.Vector3(), []);
   const tmpColor = useMemo(() => new THREE.Color(), []);
 
-  const { geometry, baseColors } = useMemo(() => {
-    const geo = new THREE.IcosahedronGeometry(1, 0);
-    const colors = instances.map((d) => RISK_BASE_COLORS[d.risk]);
-    return { geometry: geo, baseColors: colors };
-  }, [instances]);
+  const geometry = useMemo(() => new THREE.IcosahedronGeometry(1, 0), []);
+  const baseColors = useMemo(
+    () => instances.map((d) => RISK_BASE_COLORS[d.risk]),
+    [instances]
+  );
 
-  // allocate the instanceColor buffer before first render so the
-  // material compiles with USE_INSTANCING_COLOR from the start
+  // allocate the instanceColor buffer before first frame so the material
+  // compiles with USE_INSTANCING_COLOR from the start
   useLayoutEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
@@ -51,21 +50,25 @@ export default function DebrisField({ earthGroup }: { earthGroup: React.RefObjec
 
   useFrame(({ camera }, delta) => {
     const mesh = meshRef.current;
-    const earth = earthGroup.current;
-    if (!mesh || !earth) return;
+    const host = earthGroup.current;
+    if (!mesh || !host) return;
 
-    timeRef.current += delta * 0.35;
+    const showDebris = useOrbitGuard.getState().showDebris;
+    const riskMask = useOrbitGuard.getState().riskMask;
+    const dt = Math.min(delta, 0.1);
+
+    const speed = useOrbitGuard.getState().simPaused ? 0 : useOrbitGuard.getState().simSpeed;
+    timeRef.current += dt * 0.35 * speed;
     const t = timeRef.current;
 
-    // camera distance to Earth's live world position
     const earthPos = getObjectPosition('planet:earth');
     const dist = earthPos ? camera.position.distanceTo(earthPos) : Infinity;
 
-    // smooth tier fade toward target
     for (let tier = 0; tier < 4; tier++) {
-      const target = dist <= TIER_REVEAL_DISTANCE[tier] ? 1 : 0;
+      const revealed = dist <= TIER_REVEAL_DISTANCE[tier] && riskMask[tier] && showDebris;
+      const target = revealed ? 1 : 0;
       const cur = tierFactor.current[tier];
-      tierFactor.current[tier] = cur + (target - cur) * Math.min(1, delta * 2.5);
+      tierFactor.current[tier] = cur + (target - cur) * Math.min(1, dt * 2.5);
     }
 
     instances.forEach((d, i) => {
@@ -78,15 +81,13 @@ export default function DebrisField({ earthGroup }: { earthGroup: React.RefObjec
       const cosY = Math.cos(d.tiltY);
       const y1 = -z0 * sinX + d.wobble;
       const z1 = z0 * cosX;
-      pos.set(x0 * cosY + z1 * sinY, y1, -x0 * sinY + z1 * cosY);
+      dummy.position.set(x0 * cosY + z1 * sinY, y1, -x0 * sinY + z1 * cosY);
 
       const f = tierFactor.current[d.risk];
 
-      dummy.position.copy(pos);
       dummy.scale.setScalar(f < 0.02 ? 0 : d.size);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
-
       mesh.setColorAt(i, tmpColor.copy(baseColors[i]).multiplyScalar(0.35 + 0.65 * f));
     });
 

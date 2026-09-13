@@ -1,10 +1,13 @@
 /**
  * ORBITGUARD – ConjunctionAlert
- * Full-width critical alert banner + countdown
+ * Full-width critical alert banner with live countdown.
+ * Shown when conjunctionMode is active (triggered from scenario pick or
+ * conjunction row click).
  */
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOrbitGuard } from '../../store/orbitGuard';
+import { SAT_NAME_BY_ID } from '../../data/satellites';
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
 
@@ -25,12 +28,18 @@ function useCountdown(tcaIso: string | null) {
 }
 
 export default function ConjunctionAlert() {
-  const { conjunctionMode, selectedConjunction, dismissAlert } = useOrbitGuard();
+  const conjunctionMode = useOrbitGuard((s) => s.conjunctionMode);
+  const selectedConjunction = useOrbitGuard((s) => s.selectedConjunction);
+  const dismissAlert = useOrbitGuard((s) => s.dismissAlert);
   const countdown = useCountdown(selectedConjunction?.tcaIso ?? null);
+
+  if (!selectedConjunction) return null;
+
+  const name = (id: string) => SAT_NAME_BY_ID[id] ?? id;
 
   return (
     <AnimatePresence>
-      {conjunctionMode && selectedConjunction && (
+      {conjunctionMode && (
         <motion.div
           className="pointer-events-auto fixed top-14 left-[72px] right-0 z-20
             border-y border-red-500/40 bg-gradient-to-r
@@ -51,11 +60,20 @@ export default function ConjunctionAlert() {
                 ⚠ Conjunction Alert — High Risk Collision Detected
               </div>
               <div className="text-[10px] text-red-400/70 mt-0.5">
-                {selectedConjunction.primaryId} ↔ {selectedConjunction.secondaryId}
+                {name(selectedConjunction.primaryId)} ↔ {name(selectedConjunction.secondaryId)}
                 &nbsp;·&nbsp;Miss {selectedConjunction.missDistanceKm < 1
                   ? `${(selectedConjunction.missDistanceKm * 1000).toFixed(0)} m`
                   : `${selectedConjunction.missDistanceKm.toFixed(2)} km`}
-                &nbsp;·&nbsp;Confidence {selectedConjunction.confidence}%
+                {selectedConjunction.predictedMissKm != null && (
+                  <>
+                    &nbsp;→&nbsp;<span className="text-green-400">
+                      {selectedConjunction.predictedMissKm < 1
+                        ? `${Math.round(selectedConjunction.predictedMissKm * 1000)} m`
+                        : `${selectedConjunction.predictedMissKm.toFixed(2)} km`} post-maneuver
+                    </span>
+                  </>
+                )}
+                &nbsp;·&nbsp;Confidence {Math.round(selectedConjunction.confidence * (selectedConjunction.confidence <= 1 ? 100 : 1))}%
               </div>
             </div>
           </div>
@@ -63,17 +81,16 @@ export default function ConjunctionAlert() {
           <div className="flex items-center gap-6">
             <div className="text-center">
               <div className="text-[9px] text-red-400/60 uppercase tracking-widest">T−</div>
-              <div className="text-xl font-black font-mono tabular-nums text-red-300">
-                {countdown}
-              </div>
+              <div className="text-xl font-black font-mono tabular-nums text-red-300">{countdown}</div>
             </div>
             <div className="px-3 py-1 rounded-md bg-red-500/20 border border-red-400/40
               text-xs font-bold text-red-300 uppercase tracking-wider">
-              CRITICAL
+              {selectedConjunction.risk}
             </div>
             <button
               onClick={dismissAlert}
               className="text-red-400/50 hover:text-red-200 text-lg ml-2 transition-colors"
+              title="Dismiss alert"
             >
               ✕
             </button>

@@ -1,19 +1,19 @@
 /**
  * ORBITGUARD – MajorSatellites
- * Named objects (ISS, Hubble, Starlink, DEB-48291) orbiting Earth.
- * Each is a clickable group with a halo + billboard sprite, orbit line
- * trail, and zoom-based labels. Positions are written to the registry
- * every frame for the camera director and conjunction visuals.
+ * Named objects (ISS, Hubble, Starlink, DEB-48291…) orbiting Earth.
+ * Clickable markers with halos, orbit traces, and labels shown when Earth
+ * is the focused planet. Positions written to the registry every frame
+ * for the camera director and conjunction visuals.
  */
 import { useMemo, useRef, useState } from 'react';
-import { useFrame, useThree, ThreeEvent } from '@react-three/fiber';
+import { useFrame, ThreeEvent } from '@react-three/fiber';
 import { Billboard, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { MAJOR_SATELLITES, satLocalPosition, SatConfig } from '../../data/satellites';
 import { registerObject, setObjectPosition } from '../../data/registry';
 import { useOrbitGuard } from '../../store/orbitGuard';
 
-const SAT_COLORS: Record<string, string> = {
+export const SAT_COLORS: Record<string, string> = {
   LOW: '#22c55e',
   SAFE: '#22c55e',
   WATCH: '#eab308',
@@ -25,12 +25,9 @@ const SAT_COLORS: Record<string, string> = {
 function OrbitTrace({ cfg, color }: { cfg: SatConfig; color: string }) {
   const geometry = useMemo(() => {
     const pts: THREE.Vector3[] = [];
+    const tmp = new THREE.Vector3();
     for (let i = 0; i <= 128; i++) {
-      const t = (i / 128) * Math.PI * 2;
-      const tmp = new THREE.Vector3();
-      // sample the orbit by temporarily overriding phase — cheap and exact
-      const original = { ...cfg, phase: t };
-      satLocalPosition(original, 0, tmp);
+      satLocalPosition({ ...cfg, phase: (i / 128) * Math.PI * 2 }, 0, tmp);
       pts.push(tmp.clone());
     }
     return new THREE.BufferGeometry().setFromPoints(pts);
@@ -53,43 +50,49 @@ function SatMarker({
   const groupRef = useRef<THREE.Group>(null);
   const haloRef = useRef<THREE.Mesh>(null);
   const [hovered, setHovered] = useState(false);
-  const { camera } = useThree();
+  const world = useMemo(() => new THREE.Vector3(), []);
 
   const showLabels = useOrbitGuard((s) => s.showLabels);
+  const selectedPlanet = useOrbitGuard((s) => s.selectedPlanet);
   const selectedSatellite = useOrbitGuard((s) => s.selectedSatellite);
   const focusSatellite = useOrbitGuard((s) => s.focusSatellite);
+  const conjunctionMode = useOrbitGuard((s) => s.conjunctionMode);
+  const simPaused = useOrbitGuard((s) => s.simPaused);
+  const simSpeed = useOrbitGuard((s) => s.simSpeed);
 
   const regId = `sat:${cfg.id}`;
   const isSelected = selectedSatellite === cfg.id;
+  const earthFocused = selectedPlanet === 'earth';
+  const showLabel = showLabels && (earthFocused || isSelected || hovered || (conjunctionMode && cfg.id === 'deb-48291'));
   const color = SAT_COLORS[cfg.risk] ?? '#94a3b8';
   const isCritical = cfg.risk === 'CRITICAL';
-
+  const angleRef = useRef(cfg.phase);
   const local = useMemo(() => new THREE.Vector3(), []);
-  const world = useMemo(() => new THREE.Vector3(), []);
+
+  registerObject(regId);
 
   useFrame(({ clock }, delta) => {
     const g = groupRef.current;
     const earth = earthGroup.current;
     if (!g || !earth) return;
 
-    const t = clock.elapsedTime;
+    if (!simPaused) angleRef.current += cfg.speed * delta * simSpeed;
+    const t = (angleRef.current - cfg.phase) / cfg.speed;
     satLocalPosition(cfg, t, local);
-    g.position.copy(local);
 
+    g.position.copy(local);
+    earth.updateWorldMatrix(true, false);
     world.copy(local).applyMatrix4(earth.matrixWorld);
     setObjectPosition(regId, world);
 
     if (haloRef.current) {
       const m = haloRef.current.material as THREE.MeshBasicMaterial;
       const base = isSelected || hovered ? 0.85 : isCritical ? 0.5 : 0.3;
-      m.opacity = base * (0.75 + 0.25 * Math.sin(t * (isCritical ? 5 : 2.2)));
+      m.opacity = base * (0.75 + 0.25 * Math.sin(clock.elapsedTime * (isCritical ? 5 : 2.2)));
       haloRef.current.scale.setScalar(
-        (isSelected || hovered ? 2.2 : isCritical ? 1.9 : 1.4) * (1 + 0.06 * Math.sin(t * 3))
+        (isSelected || hovered ? 2.2 : isCritical ? 1.9 : 1.4) * (1 + 0.06 * Math.sin(clock.elapsedTime * 3))
       );
     }
-
-    void camera;
-    void delta;
   });
 
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
@@ -107,8 +110,6 @@ function SatMarker({
       orbitalPeriodMin: cfg.orbitalPeriodMin,
     });
   };
-
-  const haloColor = isCritical ? '#ef4444' : color;
 
   return (
     <>
@@ -134,7 +135,7 @@ function SatMarker({
           <mesh ref={haloRef}>
             <circleGeometry args={[cfg.size * 2.6, 24]} />
             <meshBasicMaterial
-              color={haloColor}
+              color={isCritical ? '#ef4444' : color}
               transparent
               opacity={0.3}
               depthWrite={false}
@@ -144,7 +145,7 @@ function SatMarker({
           </mesh>
         </Billboard>
 
-        {showLabels && (
+        {showLabel && (
           <Billboard position={[0, cfg.size + 0.09, 0]}>
             <Text
               fontSize={0.055}

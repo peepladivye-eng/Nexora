@@ -102,9 +102,9 @@ export default function CameraDirector() {
     const start = new THREE.Vector3().copy(targetWorld);
 
     if (focus.kind === 'earth-orbit') {
-      f.followDist = 4.2; // far enough to see the satellite shell
+      f.followDist = focus.distance ?? 4.2; // far enough to see the satellite shell
     } else if (focus.kind === 'satellite') {
-      f.followDist = 0.9;
+      f.followDist = 0.35;
     } else {
       const cfg = PLANET_BY_ID[focus.id];
       f.followDist = Math.max(cfg.radius * 4.5, 1.6);

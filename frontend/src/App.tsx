@@ -1,6 +1,7 @@
 /**
  * ORBITGUARD — Mission Control UI
- * Full 3D solar system + orbital intelligence + conjunction alert mode
+ * 3D-first app: full-screen solar system canvas, HTML overlay for UI.
+ * Progressive disclosure: panels appear only when triggered.
  */
 
 import { useEffect, useState } from 'react';
@@ -13,16 +14,20 @@ import Stars         from './components/scene/Stars';
 import Nebula        from './components/scene/Nebula';
 import Sun           from './components/scene/Sun';
 import AllPlanets    from './components/planets/AllPlanets';
+import EarthSystem   from './components/objects/EarthSystem';
+import ConjunctionScene from './components/objects/ConjunctionScene';
+import CameraDirector from './components/controls/CameraDirector';
 
 import TopNav            from './components/ui/TopNav';
-import EarthInfoCard     from './components/ui/EarthInfoCard';
+import PlanetInfoCard    from './components/ui/PlanetInfoCard';
 import StatsPanel        from './components/ui/StatsPanel';
 import SideNav           from './components/ui/SideNav';
 import BottomToolbar     from './components/ui/BottomToolbar';
 import ZoomControls      from './components/ui/ZoomControls';
 import IntelligencePanel from './components/ui/IntelligencePanel';
 import ConjunctionAlert  from './components/ui/ConjunctionAlert';
-
+import ObjectsPanel      from './components/ui/ObjectsPanel';
+import ScenariosPanel    from './components/ui/ScenariosPanel';
 import { useOrbitGuard } from './store/orbitGuard';
 import './App.css';
 
@@ -30,7 +35,6 @@ import './App.css';
 function BootScreen() {
   return (
     <div className="fixed inset-0 bg-[#02050d] flex flex-col items-center justify-center gap-8 overflow-hidden">
-      {/* starfield background */}
       <div className="absolute inset-0">
         {Array.from({ length: 120 }).map((_, i) => (
           <motion.div
@@ -54,7 +58,6 @@ function BootScreen() {
         ))}
       </div>
 
-      {/* logo ring */}
       <motion.div
         className="relative"
         initial={{ scale: 0.6, opacity: 0 }}
@@ -79,7 +82,6 @@ function BootScreen() {
         </div>
       </motion.div>
 
-      {/* title */}
       <div className="text-center relative z-10">
         <motion.h1
           className="text-6xl font-black tracking-[0.35em] bg-gradient-to-r from-cyan-200 via-blue-300 to-purple-300 bg-clip-text text-transparent"
@@ -144,6 +146,9 @@ export default function App() {
           <Nebula />
           <Sun position={[0, 0, 0]} />
           <AllPlanets />
+          <EarthSystem />
+          <ConjunctionScene />
+          <CameraDirector />
 
           <OrbitControls
             makeDefault
@@ -151,7 +156,7 @@ export default function App() {
             dampingFactor={0.06}
             autoRotate
             autoRotateSpeed={0.3}
-            minDistance={5}
+            minDistance={0.6}
             maxDistance={400}
           />
 
@@ -197,16 +202,16 @@ export default function App() {
       {/* HTML UI overlay — pointer-events disabled on container, re-enabled per child */}
       <div className="absolute inset-0 pointer-events-none z-10">
         <TopNav />
-        <EarthInfoCard />
         <StatsPanel />
         <SideNav />
         <ZoomControls />
         <ConjunctionAlert />
         <IntelligencePanel />
+        <PlanetInfoCard />
+        <ObjectsPanel />
+        <ScenariosPanel />
         <BottomToolbar />
       </div>
     </div>
   );
 }
-
-/* drop the separate hook — logic inlined above */
