@@ -80,9 +80,7 @@ export default function TopNav() {
 
       <div className="flex items-center gap-1">
         {NAV_TABS.map((tab) => {
-          const isActive =
-            (tab.id === 'objects' && activePanel === null && !activeScenario) ||
-            activePanel === tab.id;
+          const isActive = activePanel === tab.id;
           return (
             <button
               key={tab.label}

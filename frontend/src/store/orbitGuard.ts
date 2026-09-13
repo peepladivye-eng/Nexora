@@ -177,8 +177,8 @@ export const useOrbitGuard = create<OrbitGuardState>((set) => ({
 
   stats: { trackedObjects: 34218, activeAlerts: 12, collisionRisks: 3 },
 
-  activePanel: null,
-  activeScenario: null,
+  activePanel: 'objects',  // Start with Live View open
+  activeScenario: 'typical',  // Load typical scenario by default
 
   simPaused: false,
   simSpeed: 1,
