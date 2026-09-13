@@ -22,7 +22,7 @@ export const SAT_COLORS: Record<string, string> = {
   CRITICAL: '#ef4444',
 };
 
-function OrbitTrace({ cfg, color }: { cfg: SatConfig; color: string }) {
+function OrbitTrace({ cfg, color, visible }: { cfg: SatConfig; color: string; visible: boolean }) {
   const geometry = useMemo(() => {
     const pts: THREE.Vector3[] = [];
     const tmp = new THREE.Vector3();
@@ -34,7 +34,7 @@ function OrbitTrace({ cfg, color }: { cfg: SatConfig; color: string }) {
   }, [cfg]);
 
   return (
-    <lineLoop geometry={geometry}>
+    <lineLoop geometry={geometry} visible={visible}>
       <lineBasicMaterial color={color} transparent opacity={0.18} />
     </lineLoop>
   );
@@ -59,6 +59,7 @@ function SatMarker({
   const conjunctionMode = useOrbitGuard((s) => s.conjunctionMode);
   const simPaused = useOrbitGuard((s) => s.simPaused);
   const simSpeed = useOrbitGuard((s) => s.simSpeed);
+  const showTrails = useOrbitGuard((s) => s.showTrails);
 
   const regId = `sat:${cfg.id}`;
   const isSelected = selectedSatellite === cfg.id;
@@ -113,7 +114,7 @@ function SatMarker({
 
   return (
     <>
-      <OrbitTrace cfg={cfg} color={color} />
+      <OrbitTrace cfg={cfg} color={color} visible={showTrails} />
       <group ref={groupRef}>
         <mesh
           onClick={handleClick}

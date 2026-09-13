@@ -226,7 +226,13 @@ export const useOrbitGuard = create<OrbitGuardState>((set) => ({
   setZoomLevel: (z, d) => set({ zoomLevel: z, cameraDistanceToEarth: d ?? (z === 'close' ? 8 : z === 'regional' ? 18 : z === 'planetary' ? 35 : 80) }),
   setControlsRef: (ref) => set({ controlsRef: ref }),
 
-  triggerAlert: (c) => set({ conjunctionMode: true, selectedConjunction: c, selectedSatellite: c.primaryId ?? c.secondaryId }),
+  triggerAlert: (c) => set((s) => ({
+    conjunctionMode: true,
+    selectedConjunction: c,
+    selectedSatellite: c.primaryId ?? c.secondaryId,
+    // fly the camera to a close Earth view — both objects orbit Earth
+    focus: { kind: 'earth-orbit', id: 'earth', distance: 3.4, nonce: s.focus ? s.focus.nonce + 1 : 1 },
+  })),
   clearSelection: () =>
     set({ selectedPlanet: null, selectedSatellite: null, satInfo: null, focus: null, zoomCommand: null }),
   dismissAlert: () => set({ conjunctionMode: false }),

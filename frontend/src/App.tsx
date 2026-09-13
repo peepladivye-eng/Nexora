@@ -28,6 +28,9 @@ import IntelligencePanel from './components/ui/IntelligencePanel';
 import ConjunctionAlert  from './components/ui/ConjunctionAlert';
 import ObjectsPanel      from './components/ui/ObjectsPanel';
 import ScenariosPanel    from './components/ui/ScenariosPanel';
+import AnalyticsPanel    from './components/ui/AnalyticsPanel';
+import SettingsPanel     from './components/ui/SettingsPanel';
+import AboutPanel        from './components/ui/AboutPanel';
 import { useOrbitGuard } from './store/orbitGuard';
 import './App.css';
 
@@ -156,7 +159,7 @@ export default function App() {
             dampingFactor={0.06}
             autoRotate
             autoRotateSpeed={0.3}
-            minDistance={0.6}
+            minDistance={0.2}
             maxDistance={400}
           />
 
@@ -210,6 +213,9 @@ export default function App() {
         <PlanetInfoCard />
         <ObjectsPanel />
         <ScenariosPanel />
+        <AnalyticsPanel />
+        <SettingsPanel />
+        <AboutPanel />
         <BottomToolbar />
       </div>
     </div>

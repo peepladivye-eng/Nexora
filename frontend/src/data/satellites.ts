@@ -145,7 +145,7 @@ export function generateDebrisInstances(cfg: DebrisFieldConfig): DebrisInstance[
       tiltX: rnd() * Math.PI,
       tiltY: rnd() * Math.PI * 2,
       wobble: (rnd() - 0.5) * 0.22,
-      size: 0.008 + rnd() * 0.016,
+      size: 0.014 + rnd() * 0.026,
       risk: (rnd() < 0.06 ? 3 : rnd() < 0.16 ? 2 : rnd() < 0.45 ? 1 : 0) as 0 | 1 | 2 | 3,
     });
   }

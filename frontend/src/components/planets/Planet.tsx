@@ -20,6 +20,8 @@ export default function Planet({ config, children }: PlanetProps) {
   const showLabels = useOrbitGuard((s) => s.showLabels);
   const selectedPlanet = useOrbitGuard((s) => s.selectedPlanet);
   const focusPlanet = useOrbitGuard((s) => s.focusPlanet);
+  const simPaused = useOrbitGuard((s) => s.simPaused);
+  const simSpeed = useOrbitGuard((s) => s.simSpeed);
 
   const isSelected = selectedPlanet === config.id;
   const regId = `planet:${config.id}`;
@@ -27,7 +29,7 @@ export default function Planet({ config, children }: PlanetProps) {
   registerObject(regId);
 
   useFrame(({ clock }, delta) => {
-    angleRef.current += config.speed * delta * 0.15;
+    if (!simPaused) angleRef.current += config.speed * delta * 0.15 * simSpeed;
     const theta = angleRef.current;
 
     if (orbitGroupRef.current) {
