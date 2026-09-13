@@ -152,7 +152,31 @@ export interface OrbitGuardState {
   toggleRiskTier: (i: number) => void;
 }
 
-export const useOrbitGuard = create<OrbitGuardState>((set) => ({
+export const useOrbitGuard = create<OrbitGuardState>((set) => {
+  // Helper to convert scenario satellite ID to scene ID and create satInfo
+  const buildSatInfo = (satId: string, risk: RiskLevel): SelectedSatInfo => {
+    const idMap: Record<string, { sceneId: string; name: string; noradId: string; operator?: string; altKm: number; velKmS: number; inc: number; period: number; isDebris?: boolean }> = {
+      'ISS-ZARYA': { sceneId: 'iss', name: 'ISS (ZARYA)', noradId: '25544', operator: 'NASA / Roscosmos', altKm: 408, velKmS: 7.66, inc: 51.6, period: 92.9 },
+      'DEB-48291': { sceneId: 'deb-48291', name: 'DEB-48291', noradId: '48291', altKm: 742, velKmS: 7.62, inc: 98.7, period: 98.6, isDebris: true },
+      'HUBBLE': { sceneId: 'hubble', name: 'Hubble', noradId: '20580', operator: 'NASA / ESA', altKm: 540, velKmS: 7.59, inc: 28.5, period: 95.4 },
+      'STARLINK-3176': { sceneId: 'starlink', name: 'Starlink-3176', noradId: '52976', operator: 'SpaceX', altKm: 550, velKmS: 7.59, inc: 53.0, period: 95.6 },
+    };
+    const info = idMap[satId] || { sceneId: satId.toLowerCase(), name: satId, noradId: '00000', altKm: 400, velKmS: 7.5, inc: 0, period: 90 };
+    return {
+      id: info.sceneId,
+      name: info.name,
+      noradId: info.noradId,
+      operator: info.operator,
+      risk,
+      isDebris: info.isDebris || false,
+      altitudeKm: info.altKm,
+      velocityKmS: info.velKmS,
+      inclinationDeg: info.inc,
+      orbitalPeriodMin: info.period,
+    };
+  };
+
+  return {
   showOrbits: true,
   showDebris: true,
   showLabels: true,
@@ -177,7 +201,7 @@ export const useOrbitGuard = create<OrbitGuardState>((set) => ({
 
   stats: { trackedObjects: 34218, activeAlerts: 12, collisionRisks: 3 },
 
-  activePanel: 'objects',  // Start with Live View open
+  activePanel: null,  // Start with no panel open (user can click to open)
   activeScenario: 'typical',  // Load typical scenario by default
 
   simPaused: false,
@@ -226,13 +250,19 @@ export const useOrbitGuard = create<OrbitGuardState>((set) => ({
   setZoomLevel: (z, d) => set({ zoomLevel: z, cameraDistanceToEarth: d ?? (z === 'close' ? 8 : z === 'regional' ? 18 : z === 'planetary' ? 35 : 80) }),
   setControlsRef: (ref) => set({ controlsRef: ref }),
 
-  triggerAlert: (c) => set((s) => ({
-    conjunctionMode: true,
-    selectedConjunction: c,
-    selectedSatellite: c.primaryId ?? c.secondaryId,
-    // fly the camera to a close Earth view — both objects orbit Earth
-    focus: { kind: 'earth-orbit', id: 'earth', distance: 3.4, nonce: s.focus ? s.focus.nonce + 1 : 1 },
-  })),
+  triggerAlert: (c) => set((s) => {
+    const satId = c.primaryId ?? c.secondaryId;
+    const satInfo = buildSatInfo(satId, c.risk as RiskLevel);
+    
+    return {
+      conjunctionMode: true,
+      selectedConjunction: c,
+      selectedSatellite: satInfo.id,
+      satInfo,
+      // fly the camera to a close Earth view — both objects orbit Earth
+      focus: { kind: 'earth-orbit', id: 'earth', distance: 3.4, nonce: s.focus ? s.focus.nonce + 1 : 1 },
+    };
+  }),
   clearSelection: () =>
     set({ selectedPlanet: null, selectedSatellite: null, satInfo: null, focus: null, zoomCommand: null }),
   dismissAlert: () => set({ conjunctionMode: false }),
@@ -259,4 +289,5 @@ export const useOrbitGuard = create<OrbitGuardState>((set) => ({
       mask[i] = !mask[i];
       return { riskMask: mask };
     }),
-}));
+  }
+});
