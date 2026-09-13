@@ -19,8 +19,9 @@ const RISK_BASE_COLORS = [
   new THREE.Color('#ef4444'),
 ];
 
-/** camera-to-Earth distance at which each risk tier becomes visible */
-const TIER_REVEAL_DISTANCE = [34, 26, 20, 15];
+/** camera-to-Earth distance at which each risk tier becomes visible.
+ *  Earth radius is 1 visual unit; the 'Close' view sits ~4.2 units out. */
+const TIER_REVEAL_DISTANCE = [40, 18, 8, 5];
 
 export default function DebrisField({ earthGroup }: { earthGroup: React.RefObject<THREE.Group> }) {
   const instances = useMemo(() => generateDebrisInstances(DEBRIS_FIELD), []);
