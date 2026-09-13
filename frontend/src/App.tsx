@@ -13,6 +13,7 @@ import StatCounter from './components/StatCounter';
 import ManeuverPanel from './components/ManeuverPanel';
 import GlobeView from './components/GlobeView';
 import RiskScoreBar from './components/RiskScoreBar';
+import TcaCountdown from './components/TcaCountdown';
 import './App.css';
 
 /* ─── helpers ───────────────────────────────────────────── */
@@ -71,6 +72,7 @@ export default function App() {
   const [conjunctions, setConjunctions] = useState<ConjunctionEvent[]>([]);
   const [selected, setSelected]         = useState<ConjunctionEvent | null>(null);
   const [loading, setLoading]           = useState(true);
+  const [refreshing, setRefreshing]     = useState(false);
   const [stats, setStats]               = useState({ total_events: 0, CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 });
   const [bootDone, setBootDone]         = useState(false);
   const [lastUpdated, setLastUpdated]   = useState<string | null>(null);
@@ -84,23 +86,27 @@ export default function App() {
   }, []);
 
   /* ── fetch data ── */
+  const fetchData = async (showRefreshing = false) => {
+    try {
+      if (showRefreshing) setRefreshing(true);
+      else setLoading(true);
+      setSelected(null);
+      const res = await api.getConjunctions(undefined, 100, scenario || undefined);
+      setConjunctions(res.events);
+      setStats({ total_events: res.total_events, ...res.risk_summary });
+      setLastUpdated(res.last_updated ?? new Date().toISOString());
+    } catch (e) {
+      console.error('fetch failed', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     if (!bootDone) return;
-    (async () => {
-      try {
-        setLoading(true);
-        setSelected(null);
-        const res = await api.getConjunctions(undefined, 100, scenario || undefined);
-        setConjunctions(res.events);
-        setStats({ total_events: res.total_events, ...res.risk_summary });
-        setLastUpdated(res.last_updated);
-      } catch (e) {
-        console.error('fetch failed', e);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [bootDone, scenario]);
+    fetchData();
+  }, [bootDone, scenario]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── scroll detail into view on small screens ── */
   useEffect(() => {
@@ -228,7 +234,30 @@ export default function App() {
           <GlassPanel className="p-4" initial={false}>
             <div className="flex items-center justify-between mb-3">
               <span className="font-semibold text-sm">Conjunction Events</span>
-              <span className="text-xs text-gray-500">{stats.total_events} total</span>
+              <div className="flex items-center gap-2">
+                {lastUpdated && (
+                  <span className="text-[10px] text-gray-600 hidden sm:inline">
+                    {new Date(lastUpdated).toLocaleTimeString()}
+                  </span>
+                )}
+                <motion.button
+                  onClick={() => fetchData(true)}
+                  disabled={refreshing || loading}
+                  className="text-[10px] px-2 py-1 rounded-lg border border-white/10
+                    text-gray-400 hover:border-white/30 hover:text-white
+                    disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                  whileTap={{ scale: 0.95 }}
+                  title="Refresh conjunction data"
+                >
+                  <motion.span
+                    animate={refreshing ? { rotate: 360 } : {}}
+                    transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+                  >
+                    ↻
+                  </motion.span>
+                  {refreshing ? 'Refreshing…' : 'Refresh'}
+                </motion.button>
+              </div>
             </div>
             <div className="grid grid-cols-4 gap-1 text-center text-xs">
               {([
@@ -402,13 +431,11 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* TCA */}
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-gray-500">Time of Closest Approach</span>
-                  </div>
-                  <div className="font-mono text-sm mb-4">
-                    {new Date(selected.tca).toLocaleString()}
-                  </div>
+                  {/* TCA live countdown */}
+                  <TcaCountdown
+                    tcaIso={selected.tca}
+                    riskLevel={selected.risk_level}
+                  />
 
                   {/* demo badge */}
                   {(selected as any).is_demo && (

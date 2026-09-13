@@ -77,14 +77,14 @@ async def compute_maneuver(conjunction_id: str) -> Dict:
         v_primary = np.array(event["v_primary"])
         semi_major_axis_km = semi_major_axis_from_velocity(r_primary, v_primary)
         
-        # Time to TCA (assume 24 hours for demo - in reality would parse from TCA timestamp)
-        from datetime import datetime, timedelta
+        # Time to TCA — timezone-aware comparison
         try:
             tca = datetime.fromisoformat(event["tca"])
-            time_to_tca_s = (tca - datetime.now()).total_seconds()
+            now_ref = datetime.now(tca.tzinfo) if tca.tzinfo else datetime.now()
+            time_to_tca_s = (tca - now_ref).total_seconds()
             if time_to_tca_s <= 0:
-                time_to_tca_s = 24 * 3600  # Default to 24h if TCA is in past
-        except:
+                time_to_tca_s = 24 * 3600
+        except Exception:
             time_to_tca_s = 24 * 3600
         
         # Plan maneuver
@@ -190,8 +190,9 @@ async def get_maneuver_sweep(conjunction_id: str) -> Dict:
     from datetime import datetime
     try:
         tca = datetime.fromisoformat(event["tca"])
-        time_to_tca_s = max((tca - datetime.now()).total_seconds(), 24 * 3600)
-    except:
+        now_ref = datetime.now(tca.tzinfo) if tca.tzinfo else datetime.now()
+        time_to_tca_s = max((tca - now_ref).total_seconds(), 24 * 3600)
+    except Exception:
         time_to_tca_s = 24 * 3600
     
     result = plan_avoidance_maneuver(

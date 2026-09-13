@@ -1,100 +1,175 @@
 # NEXORA — Orbital Collision Avoidance System
 
-AI-powered orbital conjunction assessment and collision avoidance for satellite operators.
+> **PREDICT. ASSESS. AVOID.**  
+> AI-assisted space debris conjunction detection, risk scoring, and automated maneuver planning for satellites in Low Earth Orbit.
 
-## Overview
+[![MIT License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-NEXORA provides real-time collision risk assessment and automated maneuver planning for satellites in Low Earth Orbit (LEO). Built on validated orbital mechanics libraries, NEXORA screens thousands of satellite-debris conjunctions, calculates collision probabilities using industry-standard methods, and recommends optimal avoidance maneuvers.
+---
 
-## Key Features
+## What It Does
 
-- **Validated Collision Probability**: Uses `satguard` library with Foster/Chan methods validated against NASA CARA references
-- **Real-time Conjunction Screening**: Monitors Starlink constellation against active debris fields (Cosmos-2251, Iridium-33, Fengyun-1C)
-- **Intelligent Maneuver Planning**: Clohessy-Wiltshire optimal avoidance maneuvers with fuel-cost optimization
-- **High-End 3D Visualization**: React-globe.gl + Framer Motion for cinematic orbital visualization
-- **Uncertainty-Aware Risk Assessment**: Debris-tracking uncertainty calibration layer on top of base Pc calculations
+NEXORA is a full end-to-end collision avoidance workflow:
 
-## Technology Stack
+| Step | What happens |
+|---|---|
+| 📡 **TLE Ingest** | Fetches real orbital elements from CelesTrak (Starlink + 3 debris fields). Falls back to stale cache if offline. |
+| 🛰 **SGP4 Propagation** | Propagates every object's orbit forward using Skyfield's validated SGP4 implementation |
+| ⚠️ **Conjunction Screening** | KDTree spatial search finds close approaches across all object pairs |
+| 📊 **Dual Pc + Risk Score** | Foster & Chan collision probability (cross-verified) + explainable 0-100 risk score with distance/velocity/urgency breakdown |
+| 🎯 **Maneuver Planning** | Clohessy-Wiltshire equations sweep 400 delta-V × timing combinations; recommends the fuel-minimum burn that achieves safe separation |
+| ✅ **Cascade Check** | Re-screens corrected trajectory against the full catalog to detect any new risks introduced by the maneuver |
+| 🌍 **3D Globe** | Pure Canvas orthographic globe with 90-min Kepler orbit trails, drag-to-rotate, and live TCA countdown timers |
 
-### Backend
-- **FastAPI** - High-performance Python API framework
-- **satguard** - Validated conjunction assessment (SGP4, Foster/Chan Pc, CW maneuvers)
-- **kessler-toolkit** - Cross-validation of collision probability calculations
+---
 
-### Frontend
-- **React + TypeScript + Vite** - Modern frontend stack
-- **react-globe.gl** - 3D Earth visualization with orbital paths
-- **Framer Motion** - High-end UI animations and transitions
-- **Tailwind CSS** - Glassmorphism design system
-- **Recharts** - Fuel-tradeoff and risk visualization
+## Live Demo
+
+Open two terminals:
+
+```bash
+# Terminal 1 — backend
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+# → http://localhost:8000  (API docs at /docs)
+
+# Terminal 2 — frontend
+cd frontend
+npm install
+npm run dev
+# → http://localhost:5173
+```
+
+---
+
+## Demo Scenarios
+
+The header dropdown switches between named scenarios instantly (no propagation delay):
+
+| Scenario | Description |
+|---|---|
+| 🛰 Live Data | Real CelesTrak TLE screening |
+| 🚨 Critical Alert | Single emergency-level conjunction |
+| ⚡ High Activity | Multiple concurrent CRITICAL/HIGH events |
+| 📊 Typical Ops | Realistic mixed-risk operational day |
+| 🎓 Educational | One event per risk level for demonstration |
+| ✅ Quiet Ops | Minimal-risk routine monitoring |
+
+---
+
+## API Reference
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/conjunctions` | All events sorted by risk; supports `?demo_scenario=` |
+| `GET /api/maneuver/{id}` | Optimal CW avoidance maneuver |
+| `GET /api/maneuver/{id}/sweep` | Full 400-option parameter sweep (what-if simulator) |
+| `GET /api/maneuver/{id}/cascade` | Cascade risk check on corrected trajectory |
+| `GET /api/maneuver/{id}/brief?question=` | Natural-language mission briefs |
+
+---
+
+## Risk Scoring
+
+Two independent methods, both shown for transparency:
+
+**Foster / Chan Collision Probability** — validated 2D Gaussian integral with 2× debris-uncertainty calibration layer applied on top of the base LEO covariance.
+
+**Conjunction Risk Score (0–100)** — deterministic, explainable triage score (methodology from reference implementation):
+
+```
+distance_score = 100 × (1 − min(miss_km / 10, 1))          [50% weight]
+velocity_score = 100 × min(v_rel / 15, 1)                   [30% weight]
+urgency_score  = 100 × (1 − min(hours_to_tca / 24, 1))     [20% weight]
+risk_score     = 0.5×distance + 0.3×velocity + 0.2×urgency
+```
+
+Categories: 0–39 LOW · 40–69 MEDIUM · 70–84 HIGH · 85–100 CRITICAL
+
+> This score is a triage tool, not a collision probability. It is clearly labelled as such throughout the UI.
+
+---
+
+## Maneuver Planning
+
+The Clohessy-Wiltshire planner sweeps 20 delta-V values × 20 burn-timing values (400 combinations). The What-If Simulator lets you drag two sliders to explore any point in that grid without a new API call — the full sweep is fetched once and held in frontend state.
+
+Typical result for a CRITICAL event (0.82 km miss):
+- Recommended burn: **0.69 m/s in-track**, 16.5 h before TCA
+- Miss distance: 0.82 km → 5.01 km (**2×+ improvement**)
+- Propellant cost: **0.060 kg** (0.023% of satellite mass)
+
+---
 
 ## Architecture
 
 ```
-Frontend (React + react-globe.gl + Framer Motion)
-    ↓ REST API
-Backend (FastAPI + satguard)
-    ├─ TLE Loader (CelesTrak debris groups + Starlink)
-    ├─ Propagator (SGP4 via satguard)
-    ├─ Conjunction Screener (KDTree spatial search)
-    ├─ Risk Calculator (Foster/Chan Pc + debris-uncertainty calibration)
-    └─ Maneuver Planner (Clohessy-Wiltshire optimal burns)
+Frontend  (React + TypeScript + Framer Motion + Parcel)
+  ├── GlobeView          — Canvas 2D orthographic globe, Kepler orbit trails
+  ├── ConjunctionCard    — Staggered list with risk badge + TCA countdown
+  ├── RiskScoreBar       — Animated factor breakdown (distance/velocity/urgency)
+  ├── ManeuverPanel      — What-If sliders + Mission Copilot + Cascade check
+  └── TcaCountdown       — Live-updating hh:mm:ss countdown, pulses <1h
+
+Backend  (FastAPI + Python + Skyfield + SciPy)
+  ├── tle_loader.py      — CelesTrak fetch + 6h cache + stale fallback
+  ├── engine.py          — SGP4 propagation, KDTree screening, Foster/Chan Pc,
+  │                        Conjunction Risk Score, 5 named demo scenarios
+  ├── maneuvers.py       — Clohessy-Wiltshire planner, rocket equation
+  └── routers/
+      ├── conjunctions   — /api/conjunctions with demo_scenario support
+      └── maneuvers      — /api/maneuver/{id} + sweep + cascade + brief
 ```
 
-## Why satguard?
-
-We built the risk-triage UX, the calibration layer that accounts for debris tracking uncertainty, and the maneuver visualization ourselves. For the core collision probability calculation and Clohessy-Wiltshire maneuver math, we use `satguard`, an open-source library validated against published Vallado/NASA-CARA references. We didn't want to risk shipping subtly-wrong collision probability math under time pressure, and we cross-checked its output against a second independent implementation (`kessler-toolkit`) to ensure trustworthy numbers.
-
-## Quick Start
-
-### Backend Setup
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-
-### Frontend Setup
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-## API Endpoints
-
-- `GET /api/conjunctions` - List all flagged conjunction events, sorted by risk
-- `GET /api/maneuver/{conjunction_id}` - Compute optimal avoidance maneuver
-- `GET /api/maneuver/{conjunction_id}/sweep` - Get full delta-v/timing parameter sweep
-- `GET /api/copilot/{conjunction_id}` - AI-generated risk brief (optional)
+---
 
 ## Data Sources
 
-- **CelesTrak** - Public TLE data for debris fields and satellite constellations
-  - Cosmos-2251 debris (2009 Iridium-33 collision)
-  - Iridium-33 debris
-  - Fengyun-1C debris (2007 Chinese ASAT test)
-  - Starlink constellation
+| Source | What | Notes |
+|---|---|---|
+| [CelesTrak](https://celestrak.org) | TLE orbital elements | Public API, no auth required |
+| Cosmos-2251 debris | ~585 objects | 2009 Iridium-33 collision |
+| Iridium-33 debris | ~110 objects | Same 2009 event |
+| Fengyun-1C debris | ~1969 objects | 2007 Chinese ASAT test |
+| Starlink | ~10,711 satellites | Active constellation |
+
+---
 
 ## Security
 
-All API keys and credentials live exclusively in `/backend/.env` and are never exposed to the frontend. The frontend only communicates with our FastAPI backend, never directly with external services. See `.env.example` for required configuration.
+- All secrets live only in `backend/.env` (never committed — `.env` is in `.gitignore` from commit #1)
+- Frontend never holds API keys; it only calls `http://localhost:8000/api/*`
+- CORS scoped to `localhost:5173` and `localhost:5174`, not `*`
+- No `VITE_`-prefixed secrets anywhere in the frontend bundle
 
-## Development
+---
 
-Built for the AI-2 hackathon with focus on:
-1. **Validated physics** - No hand-rolled orbital math, use proven libraries
-2. **Premium UX** - Framer Motion animations, shared-element transitions, cinematic boot sequence
-3. **Real data** - Live TLE ingestion from CelesTrak, actual conjunction screening
-4. **Explainability** - Every risk number shows both Foster and Chan Pc for transparency
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Python 3.11+, FastAPI, Skyfield (SGP4), SciPy (KDTree), NumPy |
+| Frontend | React 18, TypeScript, Parcel, Framer Motion, Tailwind CSS, Recharts |
+| Orbital math | Skyfield SGP4, Clohessy-Wiltshire equations, Foster/Chan Pc, Rodrigues' rotation |
+| Data | CelesTrak TLE API (public, documented endpoint) |
+
+---
+
+## Attribution
+
+- **Skyfield** — Brandon Rhodes (MIT) — SGP4 propagation
+- **Siddhanth17/Nexora** — Conjunction Risk Score methodology, demo scenario structure
+- **CelesTrak** — Dr. T.S. Kelso — public TLE data
+- Clohessy & Wiltshire (1960) — relative motion equations
+- Foster (1992), Chan (1997) — collision probability methods
+
+---
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE)
 
-## References
+---
 
-- Vallado, D.A. "Fundamentals of Astrodynamics and Applications"
-- NASA CARA conjunction assessment methodology
-- satguard library: validated Foster/Chan/Alfano collision probability methods
-- Real-world precedent: 2009 Iridium-33/Cosmos-2251 collision (first accidental hypervelocity collision between two intact satellites)
+*Built for the AI-2 hackathon. Not for operational use.*
