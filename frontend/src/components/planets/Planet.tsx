@@ -3,6 +3,7 @@ import { useFrame, ThreeEvent } from '@react-three/fiber';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
 import { PlanetConfig } from '../../data/planets';
+import { registerObject, setObjectPosition } from '../../data/registry';
 import { useOrbitGuard } from '../../store/orbitGuard';
 
 interface PlanetProps {
@@ -18,27 +19,39 @@ export default function Planet({ config, children }: PlanetProps) {
 
   const showLabels = useOrbitGuard((s) => s.showLabels);
   const selectedPlanet = useOrbitGuard((s) => s.selectedPlanet);
-  const setSelectedPlanet = useOrbitGuard((s) => s.setSelectedPlanet);
+  const focusPlanet = useOrbitGuard((s) => s.focusPlanet);
 
   const isSelected = selectedPlanet === config.id;
+  const regId = `planet:${config.id}`;
 
-  useFrame((_, delta) => {
+  registerObject(regId);
+
+  useFrame(({ clock }, delta) => {
     angleRef.current += config.speed * delta * 0.15;
     const theta = angleRef.current;
 
     if (orbitGroupRef.current) {
       orbitGroupRef.current.position.x = Math.cos(theta) * config.distance;
       orbitGroupRef.current.position.z = Math.sin(theta) * config.distance;
+      orbitGroupRef.current.updateWorldMatrix(true, false);
+      const wp = orbitGroupRef.current.getWorldPosition(new THREE.Vector3());
+      setObjectPosition(regId, wp);
     }
 
     if (rotationGroupRef.current) {
       rotationGroupRef.current.rotation.y += config.rotation;
     }
+
+    // gentle pulse on the selection ring
+    if (meshRef.current && isSelected) {
+      const s = 1 + 0.08 * Math.sin(clock.elapsedTime * 3);
+      meshRef.current.scale.setScalar(s);
+    }
   });
 
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
-    setSelectedPlanet(config.id);
+    focusPlanet(config.id);
   };
 
   return (
@@ -83,7 +96,7 @@ export default function Planet({ config, children }: PlanetProps) {
 
       {isSelected && (
         <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-          <ringGeometry args={[config.radius * 1.15, config.radius * 1.25, 64]} />
+          <ringGeometry args={[config.radius * 1.3, config.radius * 1.45, 64]} />
           <meshBasicMaterial color="#60a5fa" transparent opacity={0.7} side={THREE.DoubleSide} />
         </mesh>
       )}

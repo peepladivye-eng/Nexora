@@ -66,6 +66,7 @@ async def health():
 
 
 # Import routers
-from app.routers import conjunctions, maneuvers
+from app.routers import conjunctions, maneuvers, trajectory
 app.include_router(conjunctions.router, prefix="/api", tags=["conjunctions"])
 app.include_router(maneuvers.router, prefix="/api", tags=["maneuvers"])
+app.include_router(trajectory.router, prefix="/api", tags=["trajectory"])

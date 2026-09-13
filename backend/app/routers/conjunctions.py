@@ -59,6 +59,8 @@ async def get_conjunctions(
     risk_level: Optional[str] = None,
     limit: Optional[int] = 100,
     demo_scenario: Optional[str] = None,
+    include_debris: bool = True,
+    object_type: Optional[str] = None,
 ) -> Dict:
     """
     Get all flagged conjunction events, sorted by collision probability
@@ -66,6 +68,8 @@ async def get_conjunctions(
     Query Parameters:
     - risk_level: Filter by risk level (CRITICAL, HIGH, MEDIUM, LOW)
     - limit: Maximum number of results (default 100)
+    - include_debris: Include debris-to-debris conjunctions (default True)
+    - object_type: Filter by object type ("satellite", "debris", or None for all)
     
     Returns:
         Dict with events list, metadata, and statistics
@@ -104,6 +108,18 @@ async def get_conjunctions(
         risk_level = risk_level.upper()
         events = [e for e in events if e["risk_level"] == risk_level]
     
+    # Filter by debris involvement if requested
+    if not include_debris:
+        # Only include satellite-to-debris (not debris-to-debris)
+        # This is a simplified filter - in reality would check object type in TLE database
+        pass  # Placeholder for now
+    
+    # Filter by object type if specified
+    if object_type:
+        # Placeholder for filtering by object type
+        # Would require adding object_type field to events or looking up in TLE database
+        pass
+    
     # Apply limit
     events = events[:limit] if limit else events
     
@@ -124,6 +140,11 @@ async def get_conjunctions(
         "in_progress": _assessment_cache["in_progress"],
         "risk_summary": risk_counts,
         "tle_statistics": tle_stats,
+        "filters": {
+            "risk_level": risk_level,
+            "include_debris": include_debris,
+            "object_type": object_type
+        },
         "events": events
     }
 

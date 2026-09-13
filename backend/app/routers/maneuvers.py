@@ -333,6 +333,144 @@ async def cascade_check(conjunction_id: str) -> Dict:
     }
 
 
+@router.get("/maneuver/{conjunction_id}/directions")
+async def get_directional_maneuvers(conjunction_id: str, delta_v_ms: float = 0.5) -> Dict:
+    """
+    Multi-directional maneuver physics table
+    
+    Computes maneuver effects in all 6 orbital directions:
+    - Posigrade (in-track forward)
+    - Retrograde (in-track backward)
+    - Normal (perpendicular to orbit, +)
+    - Anti-normal (perpendicular to orbit, -)
+    - Radial-out (away from Earth)
+    - Radial-in (toward Earth)
+    
+    Args:
+        conjunction_id: Event identifier
+        delta_v_ms: Delta-V magnitude to test (default 0.5 m/s)
+    
+    Returns:
+        Physics table showing displacement, miss distance improvement, and risk level for each direction
+    """
+    from app.routers.conjunctions import _assessment_cache
+    from app.maneuvers import clohessy_wiltshire_displacement, semi_major_axis_from_velocity, calculate_propellant_cost
+    from app.engine import calculate_collision_probability
+    
+    events = _assessment_cache.get("events", [])
+    if not events:
+        raise HTTPException(status_code=404, detail="No conjunction data available")
+    
+    # Parse conjunction_id
+    parts = conjunction_id.split("_")
+    primary_id, secondary_id = parts[0], parts[1]
+    
+    # Find event
+    event = next(
+        (e for e in events if e["norad_id_primary"] == primary_id and e["norad_id_secondary"] == secondary_id),
+        None
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Extract parameters
+    miss_distance_km = event["miss_distance_km"]
+    r_primary = np.array(event["r_primary"])
+    v_primary = np.array(event["v_primary"])
+    semi_major_axis_km = semi_major_axis_from_velocity(r_primary, v_primary)
+    
+    # Time to TCA
+    try:
+        tca = datetime.fromisoformat(event["tca"])
+        now_ref = datetime.now(tca.tzinfo) if tca.tzinfo else datetime.now()
+        time_to_tca_s = max((tca - now_ref).total_seconds(), 12 * 3600)  # min 12 hours
+    except Exception:
+        time_to_tca_s = 24 * 3600
+    
+    # Burn timing: 50% of time to TCA
+    burn_time_s = time_to_tca_s * 0.5
+    
+    # Define 6 directions
+    directions = [
+        ("posigrade", "in-track"),
+        ("retrograde", "in-track"),
+        ("normal", "cross-track"),
+        ("anti-normal", "cross-track"),
+        ("radial-out", "radial"),
+        ("radial-in", "radial")
+    ]
+    
+    results = []
+    
+    for label, cw_direction in directions:
+        # Apply direction sign
+        dv_signed = delta_v_ms
+        if label in ["retrograde", "anti-normal", "radial-in"]:
+            dv_signed = -delta_v_ms
+        
+        # Calculate CW displacement
+        try:
+            disp = clohessy_wiltshire_displacement(
+                delta_v_ms=abs(dv_signed),
+                time_before_tca_s=burn_time_s,
+                semi_major_axis_km=semi_major_axis_km,
+                direction=cw_direction
+            )
+        except Exception as e:
+            logger.warning(f"CW displacement failed for {label}: {e}")
+            disp = {"total_displacement_km": 0.0, "dx_intrack_km": 0.0, "dy_crosstrack_km": 0.0, "dz_radial_km": 0.0}
+        
+        # Compute new miss distance
+        displacement = disp["total_displacement_km"]
+        new_miss_km = np.sqrt(miss_distance_km**2 + displacement**2)
+        improvement_factor = new_miss_km / miss_distance_km if miss_distance_km > 0 else 1.0
+        
+        # Estimate new Pc
+        post_event = {**event, "miss_distance_km": new_miss_km}
+        pc_data = calculate_collision_probability(post_event)
+        
+        # Propellant cost
+        propellant_kg = calculate_propellant_cost(abs(delta_v_ms))
+        
+        results.append({
+            "direction": label,
+            "delta_v_ms": abs(delta_v_ms),
+            "burn_time_hours": burn_time_s / 3600,
+            "displacement_km": round(displacement, 3),
+            "components": {
+                "in_track_km": round(disp["dx_intrack_km"], 3),
+                "cross_track_km": round(disp["dy_crosstrack_km"], 3),
+                "radial_km": round(disp["dz_radial_km"], 3)
+            },
+            "original_miss_km": round(miss_distance_km, 3),
+            "post_miss_km": round(new_miss_km, 3),
+            "improvement_factor": round(improvement_factor, 2),
+            "post_pc": pc_data["pc_foster"],
+            "post_risk_level": pc_data["risk_level"],
+            "propellant_kg": round(propellant_kg, 4),
+            "recommended": pc_data["risk_level"] in ["LOW", "NEGLIGIBLE"]
+        })
+    
+    # Sort by improvement factor (descending)
+    results.sort(key=lambda x: x["improvement_factor"], reverse=True)
+    
+    return {
+        "success": True,
+        "conjunction_id": conjunction_id,
+        "delta_v_tested_ms": delta_v_ms,
+        "time_to_tca_hours": round(time_to_tca_s / 3600, 1),
+        "burn_timing": "50% of time to TCA",
+        "directions": results,
+        "best_direction": results[0]["direction"] if results else None,
+        "event_summary": {
+            "norad_id_primary": event["norad_id_primary"],
+            "norad_id_secondary": event["norad_id_secondary"],
+            "tca": event["tca"],
+            "original_risk_level": event.get("risk_level", "UNKNOWN")
+        }
+    }
+
+
 @router.get("/maneuver/{conjunction_id}/brief")
 async def get_maneuver_brief(conjunction_id: str, question: Optional[str] = "summary") -> Dict:
     """
