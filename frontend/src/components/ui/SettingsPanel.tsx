@@ -46,48 +46,46 @@ export default function SettingsPanel() {
   const simSpeed = useOrbitGuard((s) => s.simSpeed);
   const setSimSpeed = useOrbitGuard((s) => s.setSimSpeed);
 
+  if (activePanel !== 'settings') return null;
+
   return (
-    <AnimatePresence>
-      
-        <motion.aside
-          className="pointer-events-auto glass fixed left-20 top-20 w-80 max-h-[70vh] overflow-y-auto p-4 z-50"
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          transition={{ type: 'spring', stiffness: 280, damping: 28 }}
-        >
-          <h2 className="text-sm font-bold text-white/80 uppercase tracking-widest mb-1">
-            ⚙ Mission Settings
-          </h2>
-          <p className="text-[11px] text-white/40 mb-3">Display layers and simulation options.</p>
+    <motion.aside
+      className="pointer-events-auto glass fixed left-20 top-20 w-80 max-h-[70vh] overflow-y-auto p-4 z-50"
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -20 }}
+      transition={{ type: 'spring', stiffness: 280, damping: 28 }}
+    >
+      <h2 className="text-sm font-bold text-white/80 uppercase tracking-widest mb-1">
+        ⚙ Mission Settings
+      </h2>
+      <p className="text-[11px] text-white/40 mb-3">Display layers and simulation options.</p>
 
-          <div className="space-y-1.5">
-            <Toggle label="Orbit rings" desc="Planetary orbit lines" on={showOrbits} onClick={toggleOrbits} />
-            <Toggle label="Debris field" desc="Trackable debris around Earth" on={showDebris} onClick={toggleDebris} />
-            <Toggle label="Labels" desc="Object name labels" on={showLabels} onClick={toggleLabels} />
-            <Toggle label="Orbit trails" desc="Satellite orbit traces" on={showTrails} onClick={toggleTrails} />
-            <Toggle label="Auto-rotate camera" desc="Slow cinematic drift when idle" on={autoRotate} onClick={() => setAutoRotate(!autoRotate)} />
-          </div>
+      <div className="space-y-1.5">
+        <Toggle label="Orbit rings" desc="Planetary orbit lines" on={showOrbits} onClick={toggleOrbits} />
+        <Toggle label="Debris field" desc="Trackable debris around Earth" on={showDebris} onClick={toggleDebris} />
+        <Toggle label="Labels" desc="Object name labels" on={showLabels} onClick={toggleLabels} />
+        <Toggle label="Orbit trails" desc="Satellite orbit traces" on={showTrails} onClick={toggleTrails} />
+        <Toggle label="Auto-rotate camera" desc="Slow cinematic drift when idle" on={autoRotate} onClick={() => setAutoRotate(!autoRotate)} />
+      </div>
 
-          <div className="mt-4">
-            <div className="text-[10px] text-white/30 uppercase tracking-widest mb-1.5">Simulation Speed</div>
-            <div className="flex gap-1.5">
-              {SPEEDS.map(s => (
-                <button
-                  key={s}
-                  onClick={() => setSimSpeed(s)}
-                  className={`flex-1 text-xs px-2 py-1.5 rounded-lg border transition-colors
-                    ${simSpeed === s
-                      ? 'text-sky-300 bg-sky-500/15 border-sky-400/30'
-                      : 'text-white/40 hover:text-white/80 border-white/10 hover:border-white/25'}`}
-                >
-                  {s}×
-                </button>
-              ))}
-            </div>
-          </div>
-        </motion.aside>
-      )}
-    </AnimatePresence>
+      <div className="mt-4">
+        <div className="text-[10px] text-white/30 uppercase tracking-widest mb-1.5">Simulation Speed</div>
+        <div className="flex gap-1.5">
+          {SPEEDS.map(s => (
+            <button
+              key={s}
+              onClick={() => setSimSpeed(s)}
+              className={`flex-1 text-xs px-2 py-1.5 rounded-lg border transition-colors
+                ${simSpeed === s
+                  ? 'text-sky-300 bg-sky-500/15 border-sky-400/30'
+                  : 'text-white/40 hover:text-white/80 border-white/10 hover:border-white/25'}`}
+            >
+              {s}×
+            </button>
+          ))}
+        </div>
+      </div>
+    </motion.aside>
   );
 }
