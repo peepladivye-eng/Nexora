@@ -137,9 +137,9 @@ export default function Sun({ billboard = false, position = [0, 0, 0] }: SunProp
 
       <pointLight
         color="#fff4d6"
-        intensity={2.5}
-        distance={600}
-        decay={1.5}
+        intensity={2.1}
+        distance={0}
+        decay={0}
         castShadow={false}
       />
     </group>

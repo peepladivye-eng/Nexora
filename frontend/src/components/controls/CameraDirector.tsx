@@ -160,13 +160,12 @@ export default function CameraDirector() {
       f.t = Math.min(1, f.t + delta / FLY_DURATION);
       const k = easeInOutCubic(f.t);
 
-      // live follow target (satellites move during the flight)
+      // live follow target — satellites AND planets move during the flight
       let anchor: THREE.Vector3 | null = null;
       if (f.followId) {
         anchor = getObjectPosition(f.followId) ?? null;
-      } else {
-        const id = focus?.kind === 'planet' ? `planet:${focus.id}` : null;
-        anchor = id ? getObjectPosition(id) ?? null : null;
+      } else if (focus && (focus.kind === 'planet' || focus.kind === 'earth-orbit')) {
+        anchor = getObjectPosition(`planet:${focus.id}`) ?? null;
       }
 
       if (anchor) {
