@@ -63,9 +63,9 @@ export default function TopNav() {
   }, [search]);
 
   return (
-    <nav className="glass fixed top-0 z-30 w-full h-14 flex items-center justify-between px-6 !rounded-none">
+    <nav className="pointer-events-auto glass fixed top-0 z-50 w-full h-14 flex items-center justify-between px-6 !rounded-none">
       <button
-        className="flex items-center gap-3 group"
+        className="pointer-events-auto flex items-center gap-3 group"
         onClick={() => openPanel(null)}
         title="ORBITGUARD home"
       >
@@ -78,7 +78,7 @@ export default function TopNav() {
         </div>
       </button>
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 pointer-events-auto">
         {NAV_TABS.map((tab) => {
           const isActive = activePanel === tab.id;
           return (
@@ -88,7 +88,7 @@ export default function TopNav() {
                 console.log('🔘 Tab clicked:', tab.id, 'Current activePanel:', activePanel);
                 openPanel(tab.id);
               }}
-              className={`px-4 py-2 text-sm text-white/70 hover:text-white transition-colors ${
+              className={`pointer-events-auto px-4 py-2 text-sm text-white/70 hover:text-white transition-colors ${
                 isActive ? 'nav-underline text-white' : ''
               }`}
             >
@@ -98,8 +98,8 @@ export default function TopNav() {
         })}
       </div>
 
-      <div className="flex items-center gap-4">
-        <div className="relative">
+      <div className="flex items-center gap-4 pointer-events-auto">
+        <div className="relative pointer-events-auto">
           <input
             type="text"
             value={search}
@@ -107,14 +107,14 @@ export default function TopNav() {
             onFocus={() => setFocused(true)}
             onBlur={() => setTimeout(() => setFocused(false), 150)}
             placeholder="Search satellite, debris, or NORAD ID..."
-            className="glass-sm rounded-full w-72 h-9 pl-10 pr-4 text-sm text-white/90 placeholder:text-white/40 outline-none focus:border-sky-400/50 transition-colors"
+            className="pointer-events-auto glass-sm rounded-full w-72 h-9 pl-10 pr-4 text-sm text-white/90 placeholder:text-white/40 outline-none focus:border-sky-400/50 transition-colors"
           />
           <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/50 text-sm">🔍</span>
 
           <AnimatePresence>
             {focused && hits.length > 0 && (
               <motion.div
-                className="absolute top-11 left-0 w-full glass p-1.5 space-y-0.5"
+                className="absolute top-11 left-0 w-full glass p-1.5 space-y-0.5 z-50"
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
@@ -122,7 +122,7 @@ export default function TopNav() {
                 {hits.map(h => (
                   <button
                     key={`${h.kind}:${h.id}`}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-between"
+                    className="pointer-events-auto w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 transition-colors flex items-center justify-between"
                     onMouseDown={() => {
                       if (h.kind === 'sat') focusSatelliteFromUI(h.id);
                       else focusPlanetFromUI(h.id);
